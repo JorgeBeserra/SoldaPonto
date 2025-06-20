@@ -19,6 +19,7 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <EEPROM.h>
+#include <ESP8266httpUpdate.h>
 
 //==================== Mapeamento de Hardware ==================//
 //#define pin_Encoder_CLK 3
@@ -103,6 +104,24 @@ bool configMode = false;
 ESP8266WebServer server(80);
 ESP8266HTTPUpdateServer httpUpdater;
 
+const char* firmwareUrl = "https://github.com/USERNAME/SoldaPonto/releases/latest/download/SoldaPonto.bin";
+
+void checkForUpdate() {
+  WiFiClient client;
+  t_httpUpdate_return result = ESPhttpUpdate.update(client, firmwareUrl);
+  switch (result) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("Update failed (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("No update available");
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println("Update successful");
+      break;
+  }
+}
+
 
 void loadWifiConfig() {
   EEPROM.begin(sizeof(WifiConfig));
@@ -124,6 +143,9 @@ void connectWifi() {
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
     delay(500);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    checkForUpdate();
   }
 }
 

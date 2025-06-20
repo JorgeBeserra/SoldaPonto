@@ -1,0 +1,32 @@
+name: Build firmware
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v1
+        with:
+          version: latest
+
+      - name: Install ESP8266 core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp8266:esp8266
+
+      - name: Compile firmware
+        run: |
+          arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --export-binaries --output-dir build .
+          mv build/*.bin build/SoldaPonto.bin
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/SoldaPonto.bin
