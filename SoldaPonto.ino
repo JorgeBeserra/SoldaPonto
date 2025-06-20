@@ -14,6 +14,11 @@
 #include <Adafruit_SSD1331.h>
 #include <SPI.h>
 #include <RotaryEncoder.h>
+//--- WiFi e atualização OTA ---//
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266HTTPUpdateServer.h>
+#include <EEPROM.h>
 
 //==================== Mapeamento de Hardware ==================//
 //#define pin_Encoder_CLK 3
@@ -83,6 +88,68 @@ byte aux2 = 0;
 int16_t valorEncoder = 0;
 uint16_t time_ms = 0;
 
+//------- Configuração WiFi -------//
+struct WifiConfig {
+  char ssid[32];
+  char pass[64];
+};
+
+WifiConfig wifiConfig;
+bool configMode = false;
+
+ESP8266WebServer server(80);
+ESP8266HTTPUpdateServer httpUpdater;
+
+
+void loadWifiConfig() {
+  EEPROM.begin(sizeof(WifiConfig));
+  EEPROM.get(0, wifiConfig);
+  if (wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
+    memset(&wifiConfig, 0, sizeof(WifiConfig));
+  }
+}
+
+void saveWifiConfig() {
+  EEPROM.put(0, wifiConfig);
+  EEPROM.commit();
+}
+
+void connectWifi() {
+  if (wifiConfig.ssid[0] == 0) return;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(wifiConfig.ssid, wifiConfig.pass);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(500);
+  }
+}
+
+void startConfigPortal() {
+  configMode = true;
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("SoldaPontoConfig");
+  httpUpdater.setup(&server, "/update");
+  server.on("/", HTTP_GET, []() {
+    String page = "<form method='POST' action='/save'>SSID:<input name='ssid'><br>Senha:<input name='pass' type='password'><br><input type='submit' value='Salvar'></form><p>OTA: <a href='/update'>/update</a></p>";
+    server.send(200, "text/html", page);
+  });
+  server.on("/save", HTTP_POST, []() {
+    if (server.hasArg("ssid") && server.hasArg("pass")) {
+      String s = server.arg("ssid");
+      String p = server.arg("pass");
+      s.toCharArray(wifiConfig.ssid, sizeof(wifiConfig.ssid));
+      p.toCharArray(wifiConfig.pass, sizeof(wifiConfig.pass));
+      saveWifiConfig();
+      server.send(200, "text/plain", "Salvo. Reiniciando...");
+      delay(1000);
+      ESP.restart();
+    } else {
+      server.send(400, "text/plain", "Falha nos parametros");
+    }
+  });
+  server.begin();
+}
+
 
 void setup()
 {
@@ -96,6 +163,13 @@ void setup()
   pinMode(pin_Encoder_SW, INPUT_PULLUP);
   //Configura pino como entrada PULL-UP
   pinMode(pin_Trigger, INPUT_PULLUP);
+
+  loadWifiConfig();
+  if (digitalRead(pin_Trigger) == LOW) {
+    startConfigPortal();
+  } else {
+    connectWifi();
+  }
 
   //================= Interrupção Externa ========================//
   /* Vincula duas interrupções externas no pino 2 e 3 nas funções ISR0 e ISR1
@@ -152,6 +226,9 @@ void setup()
 
 void loop()
 {
+  if (configMode) {
+    server.handleClient();
+  }
   trigger();
   screenOne();
 }//end_void_loop ----------------------
