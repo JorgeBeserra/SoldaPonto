@@ -56,7 +56,7 @@ const uint8_t   OLED_pin_res_rst        = 5;  // D1
 const uint8_t   OLED_pin_dc_rs          = 4;  // D2
 
 
-#define pin_Trigger 2 // D4
+#define pin_Trigger 12 // D6
 #define pin_Triac 3 // RX
 
 // SSD1331 color definitions
