@@ -28,9 +28,11 @@
 //#define pin_Trigger 5
 //#define pin_Triac 12
 
-#define min_Power_ms 3
-#define max_Power_ms 120
+#define min_Time_ms 3
+#define max_Time_ms 120
 
+#define min_Cycle_ms 3
+#define max_Cycle_ms 120
 
 #define SCREEN_WIDTH 96 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -87,6 +89,7 @@ byte aux2 = 0;
 
 int16_t valorEncoder = 0;
 uint16_t time_ms = 0;
+uint16_t cycle_ms = 0;
 
 //------- Configuração WiFi -------//
 struct WifiConfig {
@@ -153,12 +156,10 @@ void startConfigPortal() {
 
 void setup()
 {
-
   Serial.begin(74880);
   //Configura pino como saída
   digitalWrite(pin_Triac, LOW);
   pinMode(pin_Triac, OUTPUT);
-
   //Configura pino como entrada PULL-UP
   pinMode(pin_Encoder_SW, INPUT_PULLUP);
   //Configura pino como entrada PULL-UP
@@ -279,23 +280,22 @@ void ISR1()// Função ligada a uma interrupção ISR logo não pode retornar va
 void screenOne()
 {
   //display.clearDisplay();
-
-  display.setTextSize(2); //Define o tamanho da fonte do texto
+  display.setTextSize(1); //Define o tamanho da fonte do texto
   //Posição Largura/Altura
-  display.setCursor(27, 0);
-  display.print("Energy:");
+  display.setCursor(1, 1);
+  display.print("Tempo:");
 
 
   if (valorEncoder <= 9)
   {
-    display.setTextSize(4); //Define o tamanho da fonte do texto
+    display.setTextSize(2); //Define o tamanho da fonte do texto
     //Posição Largura/Altura
     display.setCursor(46, 25);
     display.print(valorEncoder);
 
     //Posição Largura/Altura
     display.setCursor(71, 25);
-    display.print("%");
+    display.print("ms");
 
   }
 
