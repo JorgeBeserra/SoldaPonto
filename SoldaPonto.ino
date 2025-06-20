@@ -71,7 +71,7 @@ const uint16_t  OLED_Color_White        = 0xFFFF;
 
 // The colors we actually want to use
 uint16_t        OLED_Text_Color         = OLED_Color_Black;
-uint16_t        OLED_Backround_Color    = OLED_Color_Blue;
+uint16_t        OLED_Background_Color    = OLED_Color_Blue;
 
 //==================== Instânciando Objetos ====================//
 Adafruit_SSD1331 display =  Adafruit_SSD1331(
@@ -88,7 +88,7 @@ RotaryEncoder EncoderOne(pin_Encoder_CLK, pin_Encoder_DT);
 byte aux2 = 0;
 
 int16_t valorEncoder = 0;
-uint16_t time_ms = 0;
+uint16_t potencia_ms = 0;
 uint16_t cycle_ms = 0;
 
 //------- Configuração WiFi -------//
@@ -179,48 +179,13 @@ void setup()
   //attachInterrupt(digitalPinToInterrupt(3), ISR1, CHANGE);
 
   //EncoderOne.setPosition(25); // Energia inicial em 25%
-
-  //Inicializa o OLED 128X64 0.96 INCH com endereço I2C 0x3C
-   // Inicialize o display SPI
-  
   
   Serial.println("Display Iniciado...");
   display.begin();
   display.setFont();
-  display.fillScreen(OLED_Backround_Color);
+  display.fillScreen(OLED_Background_Color);
   display.setTextColor(OLED_Text_Color);
   display.setTextSize(1);
-
-  //Display.begin(SSD1306_SWITCHCAPVCC);
-  //Display.clearDisplay();
-  //Display.setTextColor(SSD1306_WHITE); //Define a cor do texto
-
-
-  //Limpa o display, necessário para apagar a imagem inicial da adafruit
-  //Display.clearDisplay();
-  //Atualiza o display
-  //Display.display();
-
-
-
-  //Display.setTextSize(1); //Define o tamanho da fonte do texto
-  //Posição Largura/Altura
-  //Display.setCursor(0, 0);
-  //Display.print("Acesse o projeto em:");
-
-  //Display.setTextSize(1); //Define o tamanho da fonte do texto
-  //Posição Largura/Altura
-  //Display.setCursor(0, 25);
-  //Display.print("marlonnardi.com");
-
-  //Display.display();
-
-
-  //delay(2000);
-
-  //Display.clearDisplay();
-  //Display.display();
-  //Serial.println("Iniciado...");
 
 }//endSetup --------------------------------------
 
@@ -283,9 +248,30 @@ void screenOne()
   display.setTextSize(1); //Define o tamanho da fonte do texto
   //Posição Largura/Altura
   display.setCursor(1, 1);
-  display.print("Tempo:");
+  display.print("Ciclo:");
 
+  display.setTextSize(2); //Define o tamanho da fonte do texto
+  //Posição Largura/Altura
+  display.setCursor(40, 1);
+  display.print(cycle_ms);
 
+  display.setCursor(71, 1);
+  display.print("ms");
+
+  display.setTextSize(1); //Define o tamanho da fonte do texto
+  //Posição Largura/Altura
+  display.setCursor(1, 25);
+  display.print("Potencia:");
+
+  display.setTextSize(2); //Define o tamanho da fonte do texto
+  //Posição Largura/Altura
+  display.setCursor(55, 25);
+  display.print(potencia_ms);
+
+  display.setCursor(81, 25);
+  display.print("%");
+
+  /*
   if (valorEncoder <= 9)
   {
     display.setTextSize(2); //Define o tamanho da fonte do texto
@@ -312,10 +298,11 @@ void screenOne()
     display.print("%");
 
   }
+  */
 
+/*
   if (valorEncoder >= 100)
   {
-
     display.setTextSize(4); //Define o tamanho da fonte do texto
     //Posição Largura/Altura
     display.setCursor(18, 25);
@@ -324,10 +311,9 @@ void screenOne()
     //Posição Largura/Altura
     display.setCursor(92, 25);
     display.print("%");
-
   }
 
-
+*/
 
 /*
   valorEncoder = EncoderOne.getPosition();//Captura o valor do encoder
