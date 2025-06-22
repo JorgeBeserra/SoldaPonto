@@ -12,9 +12,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Arduino CLI
-        uses: arduino/setup-arduino-cli@v1
+        uses: arduino/setup-arduino-cli@v2
         with:
-          version: v1.2.2
+          version: v2.0.0
 
       - name: Install ESP8266 core
         run: |
