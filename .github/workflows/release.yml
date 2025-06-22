@@ -39,3 +39,5 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: build/SoldaPonto.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
