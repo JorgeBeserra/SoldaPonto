@@ -23,6 +23,11 @@ jobs:
         run: |
           arduino-cli core update-index
           arduino-cli core install esp8266:esp8266
+          
+      - name: Install dependencies
+        run: |
+          arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "Adafruit SSD1306"   # adicione outras se necessário
 
       - name: Compile firmware
         run: |
