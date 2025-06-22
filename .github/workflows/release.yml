@@ -28,6 +28,7 @@ jobs:
         run: |
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1331 OLED Driver Library for Arduino"   # adicione outras se necessário
+          arduino-cli lib install "RotaryEncoder" 
 
       - name: Compile firmware
         run: |
