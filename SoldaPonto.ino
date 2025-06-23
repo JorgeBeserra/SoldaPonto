@@ -22,12 +22,19 @@
 #include <ESP8266httpUpdate.h>
 
 //==================== Mapeamento de Hardware ==================//
-//#define pin_Encoder_CLK 3
-//#define pin_Encoder_DT 2
-//#define pin_Encoder_SW 4
 
-//#define pin_Trigger 5
-//#define pin_Triac 12
+#define pin_Trigger 12 // D6
+#define pin_Triac 3 // RX
+
+#define pin_Encoder_CLK     0  // D3
+#define pin_Encoder_DT      2  // TX
+#define pin_Encoder_SW     16  // D0
+
+const uint8_t   OLED_pin_scl_sck        = 13; // D7
+const uint8_t   OLED_pin_sda_mosi       = 14; // D5
+const uint8_t   OLED_pin_cs_ss          = 15; // D8
+const uint8_t   OLED_pin_res_rst        = 5;  // D1
+const uint8_t   OLED_pin_dc_rs          = 4;  // D2
 
 #define min_Time_ms 3
 #define max_Time_ms 120
@@ -38,27 +45,7 @@
 #define SCREEN_WIDTH 96 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-// ----- Novos ----- //
-
-#define pin_Encoder_CLK     12  // D6
-#define pin_Encoder_DT      0   // D3
-#define pin_Encoder_SW      16  // D0
-
-//#define OLED_CLK    12  // D5
-//#define OLED_MOSI   13  // D7
-//#define OLED_RESET  16   // D0
-//#define OLED_DC     4   // D2
-//#define OLED_CS     5  // D1
-
-const uint8_t   OLED_pin_scl_sck        = 13;
-const uint8_t   OLED_pin_sda_mosi       = 14;
-const uint8_t   OLED_pin_cs_ss          = 15; // D7
-const uint8_t   OLED_pin_res_rst        = 5;  // D1
-const uint8_t   OLED_pin_dc_rs          = 4;  // D2
-
-
-#define pin_Trigger 12 // D6
-#define pin_Triac 3 // RX
+volatile bool encoderFlag = false;
 
 // SSD1331 color definitions
 const uint16_t  OLED_Color_Black        = 0x0000;
@@ -74,6 +61,18 @@ const uint16_t  OLED_Color_White        = 0xFFFF;
 uint16_t        OLED_Text_Color         = OLED_Color_Black;
 uint16_t        OLED_Background_Color    = OLED_Color_Blue;
 
+enum MenuState { NORMAL, EDITANDO_CICLO, EDITANDO_TEMPO };
+MenuState menuState = NORMAL;
+
+unsigned long lastBlink = 0;
+bool showValue = true;
+
+bool lastButtonState = HIGH;
+unsigned long lastButtonChange = 0;
+const unsigned long debounceDelay = 150;
+
+
+
 //==================== Instânciando Objetos ====================//
 Adafruit_SSD1331 display =  Adafruit_SSD1331(
         OLED_pin_cs_ss,
@@ -85,11 +84,13 @@ Adafruit_SSD1331 display =  Adafruit_SSD1331(
 
 RotaryEncoder EncoderOne(pin_Encoder_CLK, pin_Encoder_DT);
 
+RotaryEncoder *encoder = nullptr;
+
 //==================== Variáveis Globais ==================//
 byte aux2 = 0;
 
 int16_t valorEncoder = 0;
-uint16_t potencia_ms = 0;
+uint16_t time_ms = 0;
 uint16_t cycle_ms = 0;
 
 //------- Configuração WiFi -------//
@@ -175,10 +176,70 @@ void startConfigPortal() {
   server.begin();
 }
 
+//================== ISRs Interrupções Externas =======================//
+/* Caso qualquer pino do encoder envie sinal, o metodo .tick() sempre será
+  chamado, atualizando o valor do encoder via sua biblioteca. */
+
+IRAM_ATTR void checkPosition()// Função ligada a uma interrupção ISR logo não pode retornar valor e deve ser mais rápida possível
+{
+  encoder->tick();
+}//-------------------------endISR0
+
+void checaBotaoEncoder() {
+  bool buttonState = digitalRead(pin_Encoder_SW);
+  if (buttonState == LOW && lastButtonState == HIGH && millis() - lastButtonChange > debounceDelay) {
+    // Botão pressionado
+    if (menuState == NORMAL) {
+      menuState = EDITANDO_CICLO;
+    } else if (menuState == EDITANDO_CICLO) {
+      menuState = EDITANDO_TEMPO;
+    } else if (menuState == EDITANDO_TEMPO){
+      menuState = NORMAL;
+    }
+    lastButtonChange = millis();
+  }
+  lastButtonState = buttonState;
+}
+
+int lastEncoderPos = 0;
+
+void atualizaValoresEncoder() {
+  encoder->tick();
+  int newPos = encoder->getPosition();
+  if (newPos != lastEncoderPos) {
+    int delta = newPos - lastEncoderPos;
+    if (menuState == EDITANDO_CICLO) {
+      cycle_ms += delta;
+      if (cycle_ms < min_Cycle_ms) cycle_ms = min_Cycle_ms;
+      if (cycle_ms > max_Cycle_ms) cycle_ms = max_Cycle_ms;
+    } else if (menuState == EDITANDO_TEMPO) {
+      time_ms += delta;
+      if (time_ms < min_Time_ms) time_ms = min_Time_ms;
+      if (time_ms > max_Time_ms) time_ms = max_Time_ms;
+    }
+    lastEncoderPos = newPos;
+  }
+}
+
+
+void atualizaBlink() {
+  // Pisca só em modo edição
+  if (menuState == EDITANDO_CICLO || menuState == EDITANDO_TEMPO) {
+    if (millis() - lastBlink > 350) {
+      showValue = !showValue;
+      lastBlink = millis();
+    }
+  } else {
+    showValue = true; // Sempre mostra tudo no modo normal
+  }
+}
+
 
 void setup()
 {
   Serial.begin(74880);
+
+  encoder = new RotaryEncoder(pin_Encoder_CLK, pin_Encoder_DT, RotaryEncoder::LatchMode::TWO03);
   //Configura pino como saída
   digitalWrite(pin_Triac, LOW);
   pinMode(pin_Triac, OUTPUT);
@@ -186,6 +247,9 @@ void setup()
   pinMode(pin_Encoder_SW, INPUT_PULLUP);
   //Configura pino como entrada PULL-UP
   pinMode(pin_Trigger, INPUT_PULLUP);
+
+  pinMode(pin_Encoder_CLK, INPUT_PULLUP);
+  pinMode(pin_Encoder_DT, INPUT_PULLUP);
 
   loadWifiConfig();
   if (digitalRead(pin_Trigger) == LOW) {
@@ -197,10 +261,10 @@ void setup()
   //================= Interrupção Externa ========================//
   /* Vincula duas interrupções externas no pino 2 e 3 nas funções ISR0 e ISR1
      para garantir que o encoder sempre seja lido com prioridade.*/
-  //attachInterrupt(digitalPinToInterrupt(2), ISR0, CHANGE);
-  //attachInterrupt(digitalPinToInterrupt(3), ISR1, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(0), checkPosition, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(2), checkPosition, CHANGE);
 
-  //EncoderOne.setPosition(25); // Energia inicial em 25%
+  EncoderOne.setPosition(1);
   
   Serial.println("Display Iniciado...");
   display.begin();
@@ -217,7 +281,11 @@ void loop()
   if (configMode) {
     server.handleClient();
   }
+
   trigger();
+  checaBotaoEncoder();
+  atualizaValoresEncoder();
+  atualizaBlink();
   screenOne();
 }//end_void_loop ----------------------
 
@@ -247,117 +315,65 @@ void trigger()
 
 }//----------------------- end_selecionaTela
 
-
-//================== ISRs Interrupções Externas =======================//
-/* Caso qualquer pino do encoder envie sinal, o metodo .tick() sempre será
-  chamado, atualizando o valor do encoder via sua biblioteca. */
-
-void ISR0()// Função ligada a uma interrupção ISR logo não pode retornar valor e deve ser mais rápida possível
-{
-  EncoderOne.tick();// Começa a ler o valor do encoder
-}//-------------------------endISR0
-
-void ISR1()// Função ligada a uma interrupção ISR logo não pode retornar valor e deve ser mais rápida possível
-{
-  EncoderOne.tick();// Começa a ler o valor do encoder
-
-}//------------------------endISR1
-
-
 void screenOne()
 {
-  //display.clearDisplay();
-  display.setTextSize(1); //Define o tamanho da fonte do texto
-  //Posição Largura/Altura
-  display.setCursor(1, 1);
-  display.print("Ciclo:");
 
-  display.setTextSize(2); //Define o tamanho da fonte do texto
-  //Posição Largura/Altura
-  display.setCursor(40, 1);
-  display.print(cycle_ms);
-
-  display.setCursor(71, 1);
-  display.print("ms");
-
-  display.setTextSize(1); //Define o tamanho da fonte do texto
-  //Posição Largura/Altura
-  display.setCursor(1, 25);
-  display.print("Potencia:");
-
-  display.setTextSize(2); //Define o tamanho da fonte do texto
-  //Posição Largura/Altura
-  display.setCursor(55, 25);
-  display.print(potencia_ms);
-
-  display.setCursor(81, 25);
-  display.print("%");
-
-  /*
-  if (valorEncoder <= 9)
+  if (!digitalRead(pin_Encoder_SW) ) //Se o botão está solto
   {
-    display.setTextSize(2); //Define o tamanho da fonte do texto
-    //Posição Largura/Altura
-    display.setCursor(46, 25);
-    display.print(valorEncoder);
-
-    //Posição Largura/Altura
-    display.setCursor(71, 25);
-    display.print("ms");
-
+    Serial.println("Rotary pressionado");
   }
 
-  if (valorEncoder >= 10 && valorEncoder <= 99)
-  {
+  static int pos = 0;
 
-    display.setTextSize(4); //Define o tamanho da fonte do texto
-    //Posição Largura/Altura
-    display.setCursor(31, 25);
-    display.print(valorEncoder);
+  encoder->tick(); // just call tick() to check the state.
 
-    //Posição Largura/Altura
+  int newPos = encoder->getPosition();
+
+  //valorEncoder = EncoderOne.getPosition();//Captura o valor do encoder
+  if (pos != newPos) {
+    Serial.print("pos:");
+    Serial.print(newPos);
+    Serial.print(" dir:");
+    Serial.println((int)(encoder->getDirection()));
+    pos = newPos;
+  } // if
+
+  static bool desenhouTitulos = false;
+  if (!desenhouTitulos) {
+    display.fillScreen(OLED_Background_Color);
+    display.setTextColor(OLED_Text_Color);
+    display.setTextSize(1);
+    display.setCursor(1, 1);
+    display.print("Ciclo:");
+    display.setCursor(71, 1);
+    display.print("cl");
+    display.setCursor(1, 25);
+    display.print("Tempo:");
     display.setCursor(81, 25);
-    display.print("%");
-
-  }
-  */
-
-/*
-  if (valorEncoder >= 100)
-  {
-    display.setTextSize(4); //Define o tamanho da fonte do texto
-    //Posição Largura/Altura
-    display.setCursor(18, 25);
-    display.print(valorEncoder);
-
-    //Posição Largura/Altura
-    display.setCursor(92, 25);
-    display.print("%");
+    display.print("ms");
+    desenhouTitulos = true;
   }
 
-*/
+  // Limpa só a área dos valores
+  //display.fillRect(40, 1, 30, 16, OLED_Background_Color);
+  //display.fillRect(55, 25, 40, 16, OLED_Background_Color);
 
-/*
-  valorEncoder = EncoderOne.getPosition();//Captura o valor do encoder
-
-  if (EncoderOne.getPosition() < 1)
-  {
-    EncoderOne.setPosition(1);
-    valorEncoder = 1;
+    // Exibe ciclo (piscando só se editando)
+  if (!(menuState == EDITANDO_CICLO && !showValue)) {
+    display.fillRect(40, 1, 30, 16, OLED_Background_Color);
+    display.setCursor(40, 1);
+    display.setTextSize(2);
+    display.setTextColor(OLED_Text_Color);
+    display.print(cycle_ms);
   }
 
-  if (EncoderOne.getPosition() > 100)
-  {
-    EncoderOne.setPosition(100);
-    valorEncoder = 100;
+  // Exibe tempo (piscando só se editando)
+  if (!(menuState == EDITANDO_TEMPO && !showValue)) {
+    display.fillRect(55, 25, 40, 16, OLED_Background_Color);
+    display.setCursor(55, 25);
+    display.setTextSize(2);
+    display.setTextColor(OLED_Text_Color);
+    display.print(time_ms);
   }
-
-
-  time_ms = map(valorEncoder, 1, 100, min_Power_ms, max_Power_ms);
-
-  Serial.println(time_ms);
-
-*/
-  //Display.display();
 
 }//end_screenOne ----------------------
