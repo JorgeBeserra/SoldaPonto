@@ -21,7 +21,7 @@
 #include <EEPROM.h>
 #include <ESP8266httpUpdate.h>
 
-#define FIRMWARE_VERSION "1.0.0"
+#define FIRMWARE_VERSION "1.0.1"
 
 //==================== Mapeamento de Hardware ==================//
 
@@ -79,7 +79,8 @@ unsigned long lastButtonChange = 0;
 const unsigned long debounceDelay = 150;
 
 
-
+const char* githubAPI = "https://api.github.com/repos/JorgeBeserra/SoldaPonto/releases/latest";
+const char* firmwareBinURL = "https://github.com/JorgeBeserra/SoldaPonto/releases/latest/download/SoldaPonto.bin";
 
 
 //==================== Instânciando Objetos ====================//
@@ -119,27 +120,91 @@ bool configMode = false;
 ESP8266WebServer server(80);
 ESP8266HTTPUpdateServer httpUpdater;
 
-const char* firmwareUrl = "https://github.com/USERNAME/SoldaPonto/releases/latest/download/SoldaPonto.bin";
-
 void checkForUpdate() {
-  WiFiClient client;
-  t_httpUpdate_return result = ESPhttpUpdate.update(client, firmwareUrl);
-  switch (result) {
-    case HTTP_UPDATE_FAILED:
-      Serial.printf("Update failed (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-      break;
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.println("No update available");
-      break;
-    case HTTP_UPDATE_OK:
-      Serial.println("Update successful");
-      break;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ Sem conexão Wi-Fi. Cancelando verificação.");
+    return;
   }
+
+  // Testa resolução DNS
+  Serial.print("🔍 Testando DNS para api.github.com...");
+  IPAddress githubIP;
+  if (!WiFi.hostByName("api.github.com", githubIP)) {
+    Serial.println("❌ Falha na resolução DNS.");
+    return;
+  }
+  Serial.print("✔️ Resolvido IP: ");
+  Serial.println(githubIP);
+
+  // Inicia conexão HTTPS
+  WiFiClientSecure client;
+  client.setInsecure();  // ⚠️ Ignora SSL (porque o ESP8266 não tem espaço para certificados)
+
+  HTTPClient https;
+  const char* url = "https://api.github.com/repos/JorgeBeserra/SoldaPonto/releases/latest";
+
+  Serial.println("🔗 Acessando GitHub API...");
+  https.begin(client, url);
+  https.addHeader("User-Agent", "ESP8266");  // ⚠️ GitHub exige User-Agent
+
+  int httpCode = https.GET();
+
+  if (httpCode > 0) {
+    Serial.printf("📡 HTTP Code: %d\n", httpCode);
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = https.getString();
+      int index = payload.indexOf("\"tag_name\":\"v");
+      if (index > 0) {
+        int start = index + 13;
+        int end = payload.indexOf("\"", start);
+        String latestVersion = payload.substring(start, end);
+
+        Serial.printf("✅ Última versão no GitHub: %s\n", latestVersion.c_str());
+        Serial.printf("🔧 Minha versão atual: %s\n", FIRMWARE_VERSION);
+
+        if (latestVersion != FIRMWARE_VERSION) {
+          Serial.println("🚀 Nova versão encontrada! Iniciando atualização OTA...");
+
+          t_httpUpdate_return result = ESPhttpUpdate.update(
+            client,
+            "https://github.com/JorgeBeserra/SoldaPonto/releases/latest/download/SoldaPonto.bin"
+          );
+
+          switch (result) {
+            case HTTP_UPDATE_FAILED:
+              Serial.printf("❌ OTA falhou. Erro (%d): %s\n",
+                            ESPhttpUpdate.getLastError(),
+                            ESPhttpUpdate.getLastErrorString().c_str());
+              break;
+
+            case HTTP_UPDATE_NO_UPDATES:
+              Serial.println("⚠️ Nenhuma atualização disponível.");
+              break;
+
+            case HTTP_UPDATE_OK:
+              Serial.println("✅ Atualização concluída. Reiniciando...");
+              break;
+          }
+        } else {
+          Serial.println("👍 Firmware já está na última versão.");
+        }
+      } else {
+        Serial.println("❌ Não foi possível encontrar a tag da versão na resposta.");
+      }
+    } else {
+      Serial.printf("⚠️ GitHub respondeu HTTP %d\n", httpCode);
+    }
+  } else {
+    Serial.printf("❌ Falha na conexão. Erro HTTP: %d\n", httpCode);
+  }
+
+  https.end();
 }
 
 
+
 void loadWifiConfig() {
-  EEPROM.begin(sizeof(WifiConfig));
+  EEPROM.begin(512);
   EEPROM.get(EEPROM_WIFI_CONFIG_START, wifiConfig);
   if (wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
     memset(&wifiConfig, 0, sizeof(WifiConfig));
@@ -147,8 +212,14 @@ void loadWifiConfig() {
 }
 
 void saveWifiConfig() {
+  EEPROM.begin(512);
   EEPROM.put(EEPROM_WIFI_CONFIG_START, wifiConfig);
   EEPROM.commit();
+  Serial.println("💾 Configurações Wi-Fi salvas na EEPROM:");
+  Serial.print("🔸 SSID: ");
+  Serial.println(wifiConfig.ssid);
+  Serial.print("🔸 Senha: ");
+  Serial.println(wifiConfig.pass);
 }
 
 void saveSettings() {
@@ -184,7 +255,13 @@ void loadCounter() {
 }
 
 void connectWifi() {
-  if (wifiConfig.ssid[0] == 0) return;
+  if (wifiConfig.ssid[0] == 0) {
+    Serial.println("❌ Nenhuma rede configurada.");
+    return;
+  }
+
+  Serial.printf("🔗 Conectando no Wi-Fi SSID: %s...\n", wifiConfig.ssid);
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiConfig.ssid, wifiConfig.pass);
   unsigned long start = millis();
@@ -192,7 +269,12 @@ void connectWifi() {
     delay(500);
   }
   if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ Wi-Fi conectado!");
+    Serial.print("📡 IP: ");
+    Serial.println(WiFi.localIP());
     checkForUpdate();
+  }else{
+     Serial.println("\n❌ Falha ao conectar no Wi-Fi.");
   }
 }
 
@@ -231,21 +313,40 @@ IRAM_ATTR void checkPosition()// Função ligada a uma interrupção ISR logo n�
   encoder->tick();
 }//-------------------------endISR0
 
+unsigned long buttonPressStart = 0;
+bool buttonHeld = false;
+const unsigned long longPressDuration = 5000; // 5 segundos
+
 void checaBotaoEncoder() {
   bool buttonState = digitalRead(pin_Encoder_SW);
-  if (buttonState == LOW && lastButtonState == HIGH && millis() - lastButtonChange > debounceDelay) {
-    // Botão pressionado
-    if (menuState == NORMAL) {
-      menuState = EDITANDO_CICLO;
-    } else if (menuState == EDITANDO_CICLO) {
-      menuState = EDITANDO_TEMPO;
-    } else if (menuState == EDITANDO_TEMPO){
-      menuState = NORMAL;
-      saveSettings();
+
+  if (buttonState == LOW) { // Botão pressionado
+    if (!buttonHeld) {
+      buttonPressStart = millis();
+      buttonHeld = true;
+    } else {
+      if (millis() - buttonPressStart >= longPressDuration) {
+        Serial.println("🟢 Botão pressionado por 5s -> Verificando atualização OTA...");
+        checkForUpdate();
+        buttonHeld = false;  // Reseta após a atualização
+      }
     }
-    lastButtonChange = millis();
+  } else { // Botão solto
+    if (buttonHeld) {
+      if (millis() - buttonPressStart < longPressDuration) {
+        // Pressão curta -> troca entre os modos de edição
+        if (menuState == NORMAL) {
+          menuState = EDITANDO_CICLO;
+        } else if (menuState == EDITANDO_CICLO) {
+          menuState = EDITANDO_TEMPO;
+        } else if (menuState == EDITANDO_TEMPO) {
+          menuState = NORMAL;
+          saveSettings();
+        }
+      }
+      buttonHeld = false; // Reseta estado do botão
+    }
   }
-  lastButtonState = buttonState;
 }
 
 int lastEncoderPos = 0;
@@ -336,7 +437,7 @@ void setup()
   pinMode(pin_Encoder_DT, INPUT_PULLUP);
 
   loadWifiConfig();
-  if (digitalRead(pin_Trigger) == LOW) {
+  if (digitalRead(pin_Encoder_SW) == LOW) {
     startConfigPortal();
   } else {
     connectWifi();
