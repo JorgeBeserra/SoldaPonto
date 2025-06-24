@@ -21,6 +21,8 @@
 #include <EEPROM.h>
 #include <ESP8266httpUpdate.h>
 
+#define FIRMWARE_VERSION "1.0.0"
+
 //==================== Mapeamento de Hardware ==================//
 
 #define pin_Trigger 12 // D6
@@ -42,8 +44,15 @@ const uint8_t   OLED_pin_dc_rs          = 4;  // D2
 #define min_Cycle_ms 3
 #define max_Cycle_ms 120
 
+
+
 #define SCREEN_WIDTH 96 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define EEPROM_WIFI_CONFIG_START 0
+#define EEPROM_CYCLE_MS_ADDR 100
+#define EEPROM_TIME_MS_ADDR 102
+#define EEPROM_COUNTER_ADDR 104
 
 volatile bool encoderFlag = false;
 
@@ -73,6 +82,8 @@ const unsigned long debounceDelay = 150;
 
 
 
+
+
 //==================== Instânciando Objetos ====================//
 Adafruit_SSD1331 display =  Adafruit_SSD1331(
         OLED_pin_cs_ss,
@@ -91,7 +102,12 @@ byte aux2 = 0;
 
 int16_t valorEncoder = 0;
 uint16_t time_ms = 0;
+uint16_t last_time_ms = 0;
 uint16_t cycle_ms = 0;
+uint16_t last_cycle_ms = 0;
+uint32_t soldaCount = 0;
+uint32_t last_soldaCount = 0;
+static String last_wifi_status = "";
 
 //------- Configuração WiFi -------//
 struct WifiConfig {
@@ -126,15 +142,47 @@ void checkForUpdate() {
 
 void loadWifiConfig() {
   EEPROM.begin(sizeof(WifiConfig));
-  EEPROM.get(0, wifiConfig);
+  EEPROM.get(EEPROM_WIFI_CONFIG_START, wifiConfig);
   if (wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
     memset(&wifiConfig, 0, sizeof(WifiConfig));
   }
 }
 
 void saveWifiConfig() {
-  EEPROM.put(0, wifiConfig);
+  EEPROM.put(EEPROM_WIFI_CONFIG_START, wifiConfig);
   EEPROM.commit();
+}
+
+void saveSettings() {
+  EEPROM.begin(512);
+  EEPROM.put(EEPROM_CYCLE_MS_ADDR, cycle_ms);
+  EEPROM.put(EEPROM_TIME_MS_ADDR, time_ms);
+  EEPROM.commit();
+  EEPROM.end();
+}
+
+void loadSettings() {
+  EEPROM.begin(512);
+  EEPROM.get(EEPROM_CYCLE_MS_ADDR, cycle_ms);
+  EEPROM.get(EEPROM_TIME_MS_ADDR, time_ms);
+  EEPROM.end();
+
+  // Se os valores forem inválidos, aplica padrão seguro
+  if (cycle_ms < min_Cycle_ms || cycle_ms > max_Cycle_ms) cycle_ms = 30;
+  if (time_ms < min_Time_ms || time_ms > max_Time_ms) time_ms = 30;
+}
+
+void saveCounter() {
+  EEPROM.begin(512);
+  EEPROM.put(EEPROM_COUNTER_ADDR, soldaCount);
+  EEPROM.commit();
+  EEPROM.end();
+}
+
+void loadCounter() {
+  EEPROM.begin(512);
+  EEPROM.get(EEPROM_COUNTER_ADDR, soldaCount);
+  EEPROM.end();
 }
 
 void connectWifi() {
@@ -195,6 +243,7 @@ void checaBotaoEncoder() {
       menuState = EDITANDO_TEMPO;
     } else if (menuState == EDITANDO_TEMPO){
       menuState = NORMAL;
+      saveSettings();
     }
     lastButtonChange = millis();
   }
@@ -234,6 +283,43 @@ void atualizaBlink() {
   }
 }
 
+void splashScreen() {
+  display.fillScreen(OLED_Color_Black);
+  display.setTextColor(OLED_Color_White);
+
+  // Texto principal
+  display.setTextSize(2);
+
+  int16_t x1, y1;
+  uint16_t w, h;
+
+  display.getTextBounds("Solda", 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, 10);
+  display.print("Solda");
+
+  display.getTextBounds("Ponto", 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, 35);
+  display.print("Ponto");
+
+  // Versão
+  display.setTextSize(1);
+  String versao = "Versao: ";
+  versao += FIRMWARE_VERSION;
+
+  display.getTextBounds(versao, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, 55);
+  display.print(versao);
+
+  delay(2000);
+}
+
+String getWifiStatus() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return "WiFi OK";
+  } else {
+    return "Sem WiFi";
+  }
+}
 
 void setup()
 {
@@ -258,6 +344,9 @@ void setup()
     connectWifi();
   }
 
+  loadSettings();
+  loadCounter();
+
   //================= Interrupção Externa ========================//
   /* Vincula duas interrupções externas no pino 2 e 3 nas funções ISR0 e ISR1
      para garantir que o encoder sempre seja lido com prioridade.*/
@@ -269,10 +358,8 @@ void setup()
   Serial.println("Display Iniciado...");
   display.begin();
   display.setFont();
+  splashScreen();
   display.fillScreen(OLED_Background_Color);
-  display.setTextColor(OLED_Text_Color);
-  display.setTextSize(1);
-
 }//endSetup --------------------------------------
 
 
@@ -302,14 +389,38 @@ void trigger()
   if (!digitalRead(pin_Trigger) && aux2 == 1) //Se o botão está pressionado
   {
 
+
     digitalWrite(pin_Triac, HIGH);
     Serial.println("Ativado");
-    delay(120);
+
+    // Barra de progresso
+    const int barX = 10;
+    const int barY = 50;
+    const int barWidth = 76;
+    const int barHeight = 10;
+
+    display.drawRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, OLED_Color_White);
+    unsigned long start = millis();
+
+    while (millis() - start < time_ms) {
+      float progress = (float)(millis() - start) / (float)time_ms;
+      if (progress > 1.0) progress = 1.0;
+      int filled = progress * barWidth;
+
+      display.fillRect(barX, barY, filled, barHeight, OLED_Color_Green);
+      display.fillRect(barX + filled, barY, barWidth - filled, barHeight, OLED_Background_Color);
+
+      delay(10);
+    }
+
     digitalWrite(pin_Triac, LOW);
     Serial.println("Desativado");
-    delay(3000);
 
+    display.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, OLED_Background_Color);
+    soldaCount++;
+    saveCounter();
     aux2 = 0;
+    delay(500);
   }
 
 
@@ -317,7 +428,9 @@ void trigger()
 
 void screenOne()
 {
-
+  
+  String wifiStatus = (WiFi.status() == WL_CONNECTED) ? "[WiFi]" : "[ X ]";
+  
   if (!digitalRead(pin_Encoder_SW) ) //Se o botão está solto
   {
     Serial.println("Rotary pressionado");
@@ -345,23 +458,35 @@ void screenOne()
     display.setTextSize(1);
     display.setCursor(1, 1);
     display.print("Ciclo:");
-    display.setCursor(71, 1);
+    display.setCursor(80, 1);
     display.print("cl");
     display.setCursor(1, 25);
     display.print("Tempo:");
-    display.setCursor(81, 25);
+    display.setCursor(80, 25);
     display.print("ms");
+    display.setCursor(40, 55);
+    display.print(getWifiStatus());
     desenhouTitulos = true;
   }
 
   // Limpa só a área dos valores
-  //display.fillRect(40, 1, 30, 16, OLED_Background_Color);
-  //display.fillRect(55, 25, 40, 16, OLED_Background_Color);
+  if(last_cycle_ms != cycle_ms){
+    display.fillRect(35, 1, 45, 16, OLED_Background_Color);
+    last_cycle_ms = cycle_ms;
+  }
+
+  if(last_time_ms != time_ms){
+    display.fillRect(35, 25, 45, 16, OLED_Background_Color);
+    last_time_ms = time_ms;
+  }
 
     // Exibe ciclo (piscando só se editando)
   if (!(menuState == EDITANDO_CICLO && !showValue)) {
-    display.fillRect(40, 1, 30, 16, OLED_Background_Color);
-    display.setCursor(40, 1);
+    
+    if (cycle_ms <= 9) display.setCursor(67, 1);
+    else if (cycle_ms >= 10 && cycle_ms <= 99) display.setCursor(55, 1);
+    else if (cycle_ms >= 100) display.setCursor(43, 1);
+
     display.setTextSize(2);
     display.setTextColor(OLED_Text_Color);
     display.print(cycle_ms);
@@ -369,11 +494,30 @@ void screenOne()
 
   // Exibe tempo (piscando só se editando)
   if (!(menuState == EDITANDO_TEMPO && !showValue)) {
-    display.fillRect(55, 25, 40, 16, OLED_Background_Color);
-    display.setCursor(55, 25);
+
+    if (time_ms <= 9) display.setCursor(67, 25);
+    else if (time_ms >= 10 && time_ms <= 99) display.setCursor(55, 25);
+    else if (time_ms >= 100) display.setCursor(43, 25);
+    
     display.setTextSize(2);
     display.setTextColor(OLED_Text_Color);
     display.print(time_ms);
+  }
+
+   if (last_soldaCount != soldaCount || wifiStatus != last_wifi_status) {
+    // Limpa área inferior
+    display.fillRect(0, 50, SCREEN_WIDTH, 14, OLED_Background_Color);
+
+    display.setTextSize(1);
+    display.setCursor(1, 55);
+    display.print(wifiStatus);
+
+    display.setCursor(60, 55);
+    display.print("S:");
+    display.print(soldaCount);
+
+    last_soldaCount = soldaCount;
+    last_wifi_status = wifiStatus;
   }
 
 }//end_screenOne ----------------------
