@@ -44,8 +44,6 @@ const uint8_t   OLED_pin_dc_rs          = 4;  // D2
 #define min_Cycle_ms 3
 #define max_Cycle_ms 120
 
-
-
 #define SCREEN_WIDTH 96 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
