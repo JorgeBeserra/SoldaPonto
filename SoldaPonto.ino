@@ -21,7 +21,7 @@
 #include <EEPROM.h>
 #include <ESP8266httpUpdate.h>
 
-#define FIRMWARE_VERSION "1.0.1"
+#define FIRMWARE_VERSION "1.0.2"
 
 //==================== Mapeamento de Hardware ==================//
 
@@ -126,7 +126,7 @@ void checkForUpdate() {
     return;
   }
 
-  // Testa resolução DNS
+  // Testa DNS
   Serial.print("🔍 Testando DNS para api.github.com...");
   IPAddress githubIP;
   if (!WiFi.hostByName("api.github.com", githubIP)) {
@@ -136,69 +136,80 @@ void checkForUpdate() {
   Serial.print("✔️ Resolvido IP: ");
   Serial.println(githubIP);
 
-  // Inicia conexão HTTPS
+  // Conexão HTTPS
   WiFiClientSecure client;
-  client.setInsecure();  // ⚠️ Ignora SSL (porque o ESP8266 não tem espaço para certificados)
+  client.setInsecure(); // Ignora SSL
 
   HTTPClient https;
   const char* url = "https://api.github.com/repos/JorgeBeserra/SoldaPonto/releases/latest";
 
   Serial.println("🔗 Acessando GitHub API...");
   https.begin(client, url);
-  https.addHeader("User-Agent", "ESP8266");  // ⚠️ GitHub exige User-Agent
+  https.addHeader("User-Agent", "ESP8266"); // GitHub exige
 
   int httpCode = https.GET();
 
-  if (httpCode > 0) {
-    Serial.printf("📡 HTTP Code: %d\n", httpCode);
-    if (httpCode == HTTP_CODE_OK) {
-      String payload = https.getString();
-      int index = payload.indexOf("\"tag_name\":\"v");
-      if (index > 0) {
-        int start = index + 13;
-        int end = payload.indexOf("\"", start);
-        String latestVersion = payload.substring(start, end);
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = https.getString();
 
-        Serial.printf("✅ Última versão no GitHub: %s\n", latestVersion.c_str());
-        Serial.printf("🔧 Minha versão atual: %s\n", FIRMWARE_VERSION);
+    // Extrair a tag_name (versão)
+    int tagIndex = payload.indexOf("\"tag_name\":\"v");
+    if (tagIndex < 0) {
+      Serial.println("❌ Não encontrou a versão no JSON.");
+      https.end();
+      return;
+    }
+    int start = tagIndex + 13;
+    int end = payload.indexOf("\"", start);
+    String latestVersion = payload.substring(start, end);
 
-        if (latestVersion != FIRMWARE_VERSION) {
-          Serial.println("🚀 Nova versão encontrada! Iniciando atualização OTA...");
+    Serial.printf("✅ Última versão no GitHub: %s\n", latestVersion.c_str());
+    Serial.printf("🔧 Minha versão atual: %s\n", FIRMWARE_VERSION);
 
-          t_httpUpdate_return result = ESPhttpUpdate.update(
-            client,
-            "https://github.com/JorgeBeserra/SoldaPonto/releases/latest/download/SoldaPonto.bin"
-          );
+    // Extrair browser_download_url (link direto do binário)
+    int urlIndex = payload.indexOf("\"browser_download_url\":\"");
+    if (urlIndex < 0) {
+      Serial.println("❌ Não encontrou o link do binário no JSON.");
+      https.end();
+      return;
+    }
+    int urlStart = urlIndex + 25;
+    int urlEnd = payload.indexOf("\"", urlStart);
+    String binUrl = payload.substring(urlStart, urlEnd);
 
-          switch (result) {
-            case HTTP_UPDATE_FAILED:
-              Serial.printf("❌ OTA falhou. Erro (%d): %s\n",
-                            ESPhttpUpdate.getLastError(),
-                            ESPhttpUpdate.getLastErrorString().c_str());
-              break;
+    Serial.println("🗂️ Link do binário encontrado:");
+    Serial.println(binUrl);
 
-            case HTTP_UPDATE_NO_UPDATES:
-              Serial.println("⚠️ Nenhuma atualização disponível.");
-              break;
+    https.end(); // Fecha a conexão HTTP
 
-            case HTTP_UPDATE_OK:
-              Serial.println("✅ Atualização concluída. Reiniciando...");
-              break;
-          }
-        } else {
-          Serial.println("👍 Firmware já está na última versão.");
-        }
-      } else {
-        Serial.println("❌ Não foi possível encontrar a tag da versão na resposta.");
+    if (latestVersion != FIRMWARE_VERSION) {
+      Serial.println("🚀 Nova versão encontrada! Iniciando atualização OTA...");
+
+      t_httpUpdate_return result = ESPhttpUpdate.update(client, binUrl);
+
+      switch (result) {
+        case HTTP_UPDATE_FAILED:
+          Serial.printf("❌ OTA falhou. Erro (%d): %s\n",
+                        ESPhttpUpdate.getLastError(),
+                        ESPhttpUpdate.getLastErrorString().c_str());
+          break;
+
+        case HTTP_UPDATE_NO_UPDATES:
+          Serial.println("⚠️ Nenhuma atualização disponível.");
+          break;
+
+        case HTTP_UPDATE_OK:
+          Serial.println("✅ Atualização concluída. Reiniciando...");
+          break;
       }
     } else {
-      Serial.printf("⚠️ GitHub respondeu HTTP %d\n", httpCode);
+      Serial.println("👍 Firmware já está na última versão.");
     }
-  } else {
-    Serial.printf("❌ Falha na conexão. Erro HTTP: %d\n", httpCode);
-  }
 
-  https.end();
+  } else {
+    Serial.printf("❌ Falha na conexão. HTTP Code: %d\n", httpCode);
+    https.end();
+  }
 }
 
 
