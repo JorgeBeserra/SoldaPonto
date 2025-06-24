@@ -48,8 +48,14 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag -a v${{ steps.version.outputs.version }} -m "Release v${{ steps.version.outputs.version }}"
-          git push origin v${{ steps.version.outputs.version }}
+          git fetch --tags
+          TAG_EXISTS=$(git tag -l "v${{ steps.version.outputs.version }}")
+          if [ "$TAG_EXISTS" ]; then
+            echo "Tag v${{ steps.version.outputs.version }} already exists. Skipping tag creation."
+          else
+            git tag -a v${{ steps.version.outputs.version }} -m "Release v${{ steps.version.outputs.version }}"
+            git push origin v${{ steps.version.outputs.version }}
+          fi
 
       - name: Compile firmware
         run: |
