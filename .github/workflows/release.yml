@@ -1,8 +1,12 @@
 name: Build firmware
 
 on:
-  release:
-    types: [created]
+  push:
+    branches: 
+      - main  # ou seu branch padrão
+    paths:
+      - 'SoldaPonto.ino'  # Monitora apenas esse arquivo
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,12 +30,26 @@ jobs:
         run: |
           arduino-cli core update-index
           arduino-cli core install esp8266:esp8266
+      
+      - name: Extract firmware version
+        id: version
+        run: |
+          VERSION=$(grep -Po '(?<=#define FIRMWARE_VERSION ")[^"]*' SoldaPonto.ino)
+          echo "Firmware version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           
       - name: Install dependencies
         run: |
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1331 OLED Driver Library for Arduino"   # adicione outras se necessário
           arduino-cli lib install "RotaryEncoder" 
+      
+      - name: Create Git Tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -a v${{ steps.version.outputs.version }} -m "Release v${{ steps.version.outputs.version }}"
+          git push origin v${{ steps.version.outputs.version }}
 
       - name: Compile firmware
         run: |
@@ -41,6 +59,8 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v1
         with:
+          name: "Firmware v${{ steps.version.outputs.version }}"
+          tag_name: "v${{ steps.version.outputs.version }}"
           files: build/SoldaPonto.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
