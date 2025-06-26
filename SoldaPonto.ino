@@ -27,7 +27,7 @@
 //============================================================
 // ⚙️ Mapeamento de Hardware e Parâmetros
 //============================================================
-#define FIRMWARE_VERSION "1.0.4"
+#define FIRMWARE_VERSION "1.0.5"
 
 // 🟦 Pinos
 #define pin_Trigger 12 // D6
@@ -46,8 +46,8 @@ const uint8_t   OLED_pin_dc_rs          = 4;  // D2
 // 🔧 Parâmetros de tempo
 #define min_Time_ms 3
 #define max_Time_ms 120
-#define min_Cycle_ms 3
-#define max_Cycle_ms 120
+#define min_Cycle_ms 1
+#define max_Cycle_ms 50
 
 // 🧠 EEPROM
 #define EEPROM_MAGIC_ADDR 500  // Posição na EEPROM
