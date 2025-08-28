@@ -27,7 +27,7 @@
 //============================================================
 // ⚙️ Mapeamento de Hardware e Parâmetros
 //============================================================
-#define FIRMWARE_VERSION "1.0.6"
+#define FIRMWARE_VERSION "1.0.8"
 
 // 🟦 Pinos
 #define pin_Trigger 12 // D6
