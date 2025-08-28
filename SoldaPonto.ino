@@ -27,7 +27,7 @@
 //============================================================
 // ⚙️ Mapeamento de Hardware e Parâmetros
 //============================================================
-#define FIRMWARE_VERSION "1.0.5"
+#define FIRMWARE_VERSION "1.0.6"
 
 // 🟦 Pinos
 #define pin_Trigger 12 // D6
@@ -742,8 +742,8 @@ void checkEEPROM() {
     memset(&wifiConfig, 0, sizeof(WifiConfig));
 
     // Resetando configurações de ciclo e tempo
-    cycle_ms = 30;
-    time_ms = 30;
+    cycle_ms = 20;
+    time_ms = 20;
 
     // Resetando contador de soldas
     soldaCount = 0;
