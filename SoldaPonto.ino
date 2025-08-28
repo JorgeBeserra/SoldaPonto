@@ -27,14 +27,14 @@
 //============================================================
 // ⚙️ Mapeamento de Hardware e Parâmetros
 //============================================================
-#define FIRMWARE_VERSION "1.0.8"
+#define FIRMWARE_VERSION "1.0.9"
 
 // 🟦 Pinos
 #define pin_Trigger 12 // D6
 #define pin_Triac 3 // RX
 
 #define pin_Encoder_CLK     0  // D3
-#define pin_Encoder_DT      2  // TX
+#define pin_Encoder_DT      2  // D4
 #define pin_Encoder_SW     16  // D0
 
 const uint8_t   OLED_pin_scl_sck        = 13; // D7
@@ -128,7 +128,7 @@ uint32_t last_soldaCount = 0;
 static String last_wifi_status = "";
 
 int16_t valorEncoder = 0;
-const unsigned long WATCHDOG_TIMEOUT = 15000; // 15 segundos
+const unsigned long WATCHDOG_TIMEOUT = 30000; // 15 segundos
 volatile bool encoderFlag = false;
 
 bool showValue = true;
@@ -285,6 +285,7 @@ void checkForUpdate() {
   IPAddress githubIP;
   if (!WiFi.hostByName("api.github.com", githubIP)) {
     Serial.println("❌ Falha na resolução DNS.");
+    watchdogReset(); yield();
     return;
   }
   Serial.print("✔️ Resolvido IP: ");
@@ -349,7 +350,9 @@ void checkForUpdate() {
       ESPhttpUpdate.rebootOnUpdate(true);
       ESPhttpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
+      watchdogReset(); yield();
       t_httpUpdate_return result = ESPhttpUpdate.update(client, binUrl);
+      watchdogReset(); yield();
 
       switch (result) {
         case HTTP_UPDATE_FAILED:
@@ -389,6 +392,7 @@ void checkForUpdate() {
 void loadWifiConfig() {
   EEPROM.begin(512);
   EEPROM.get(EEPROM_WIFI_CONFIG_START, wifiConfig);
+  EEPROM.end();
 
   if (wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
     Serial.println("🚨 EEPROM inválida ou limpa. Aplicando valores padrão.");
@@ -467,7 +471,9 @@ void connectWifi() {
 
   while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < wifiTimeout) {
     Serial.print(".");
-    delay(500);
+    delay(250);
+    yield();
+    watchdogReset();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -505,7 +511,9 @@ void monitorWifi() {
 
       while (WiFi.status() != WL_CONNECTED && millis() - startReconnect < reconnectTimeout) {
         Serial.print(".");
-        delay(500);
+        delay(250);
+        yield();
+        watchdogReset();
       }
 
       if (WiFi.status() == WL_CONNECTED) {
@@ -650,10 +658,13 @@ void checaBotaoEncoder() {
         // Pressão curta -> troca entre os modos de edição
         if (menuState == NORMAL) {
           menuState = EDITANDO_CICLO;
+          Serial.println("🟢 Botão pressionado Ciclo...");
         } else if (menuState == EDITANDO_CICLO) {
           menuState = EDITANDO_TEMPO;
+          Serial.println("🟢 Botão pressionado Tempo...");
         } else if (menuState == EDITANDO_TEMPO) {
           menuState = NORMAL;
+          Serial.println("🟢 Botão pressionado Normal...");
           saveSettings();
         }
       }
