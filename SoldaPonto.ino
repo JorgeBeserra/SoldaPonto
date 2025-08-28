@@ -27,7 +27,7 @@
 //============================================================
 // ⚙️ Mapeamento de Hardware e Parâmetros
 //============================================================
-#define FIRMWARE_VERSION "1.0.9"
+#define FIRMWARE_VERSION "1.0.10"
 
 // 🟦 Pinos
 #define pin_Trigger 12 // D6
@@ -36,6 +36,10 @@
 #define pin_Encoder_CLK     0  // D3
 #define pin_Encoder_DT      2  // D4
 #define pin_Encoder_SW     16  // D0
+
+// === Rede elétrica ===
+#define MAINS_HZ 60
+#define HALF_CYCLE_US (1000000UL / (2UL * MAINS_HZ))  // ~8333 us @60Hz
 
 const uint8_t   OLED_pin_scl_sck        = 13; // D7
 const uint8_t   OLED_pin_sda_mosi       = 14; // D5
@@ -178,6 +182,8 @@ void screenOne();
 String getWifiStatus();
 
 // 🛠️ Trigger
+// Arredonda um tempo em micros para múltiplo de meia-onda
+static inline uint32_t roundToHalfCycles(uint32_t us);
 void trigger();
 
 //============================================================
@@ -794,29 +800,79 @@ void loop()
 }//end_void_loop ----------------------
 
 
+// Arredonda um tempo em micros para múltiplo de meia-onda
+static inline uint32_t roundToHalfCycles(uint32_t us) {
+  uint32_t n = (us + (HALF_CYCLE_US/2)) / HALF_CYCLE_US;
+  if (n < 1) n = 1;                 // garante pelo menos 1 meia-onda
+  return n * HALF_CYCLE_US;
+}
+
+void delayMicrosFeed(uint32_t us) {
+  uint32_t start = micros();
+  while ((micros() - start) < us) {
+    // Alimenta watchdog e WiFi
+    yield();
+    watchdogReset();
+  }
+}
 
 void trigger()
 {
+  static const uint16_t intervalo_ms = 40; // pausa entre pulsos
 
   if (digitalRead(pin_Trigger) ) //Se o botão está solto
   {
     aux2 = 1;
   }
 
-  if (!digitalRead(pin_Trigger) && aux2 == 1) //Se o botão está pressionado
-  {
-
-
-    digitalWrite(pin_Triac, HIGH);
-    Serial.println("Ativado");
+if (!digitalRead(pin_Trigger) && aux2 == 1) { // pressionado uma vez
+    // Calcula duração do pulso como múltiplos de meia-onda (mais limpo p/ SSR zero-cross)
+    uint32_t pulso_us = roundToHalfCycles((uint32_t)time_ms * 1000UL);
 
     // Barra de progresso
-    const int barX = 10;
-    const int barY = 50;
-    const int barWidth = 76;
-    const int barHeight = 10;
+    const int barX = 10, barY = 50, barW = 76, barH = 10;
+    display.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, OLED_Color_White);
 
-    display.drawRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, OLED_Color_White);
+    for (uint16_t p = 0; p < cycle_ms; ++p) {          // cycle_ms = número de pulsos
+      // Liga SSR (zero-cross: vai conduzir no próximo zero da rede)
+      digitalWrite(pin_Triac, HIGH);
+      Serial.printf("Pulso %u/%u ON\n", p+1, cycle_ms);
+
+      // Progresso do pulso atual (baseado no tempo arredondado)
+      uint32_t start = micros();
+      while ((micros() - start) < pulso_us) {
+        float progress = (float)(micros() - start) / (float)pulso_us;
+        if (progress > 1.0f) progress = 1.0f;
+        int filled = (int)(progress * barW);
+        display.fillRect(barX, barY, filled, barH, OLED_Color_Green);
+        display.fillRect(barX + filled, barY, barW - filled, barH, OLED_Background_Color);
+
+        // Alimenta watchdog durante o pulso
+        yield();
+        watchdogReset();
+      }
+
+      // Desliga SSR (vai desligar no próximo zero da rede)
+      digitalWrite(pin_Triac, LOW);
+      Serial.println("Pulso OFF");
+
+      // Limpa barra ao fim do pulso
+      display.fillRect(barX, barY, barW, barH, OLED_Background_Color);
+
+      // Conta solda e salva
+      soldaCount++;
+      saveCounter();
+
+      // Pausa entre pulsos (exceto depois do último)
+      if (p + 1 < cycle_ms) {
+        uint32_t pausa_us = (uint32_t)intervalo_ms * 1000UL;
+        delayMicrosFeed(pausa_us);
+      }
+    }
+
+
+
+    /*
     unsigned long start = millis();
 
     while (millis() - start < time_ms) {
@@ -836,8 +892,10 @@ void trigger()
     display.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, OLED_Background_Color);
     soldaCount++;
     saveCounter();
+    */
+
     aux2 = 0;
-    delay(500);
+    delay(200);
   }
 
 
