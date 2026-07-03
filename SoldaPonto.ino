@@ -1,16 +1,8 @@
 /*********************************************
   Autor: Marlon Nardi Walendorff
   Projeto: Solda ponto para baterias de lítio com Arduino
-  Detalhes do projeto:https://marlonnardi.com/2023/12/03/como-fazer-solda-ponto-profissional-para-baterias-18650-e-mais-construa-sua-propria-bicicleta-eletrica-1/
+  Atualização: Jorge Souza
 **********************************************/
-
-/*
-  Atualizaçao: Jorge Souza
-*/
-
-//============================================================
-// ✅ Bibliotecas
-//============================================================
 
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
@@ -20,84 +12,77 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
-#include <EEPROM.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266httpUpdate.h>
+#include <WiFiClientSecureBearSSL.h>
+#include <EEPROM.h>
 #include <DNSServer.h>
 
-//============================================================
-// ⚙️ Mapeamento de Hardware e Parâmetros
-//============================================================
 #define FIRMWARE_VERSION "1.0.10"
 
-// 🟦 Pinos
-#define pin_Trigger 12 // D6
-#define pin_Triac 3 // RX
+// Pinos
+#define pin_Trigger 12       // D6
+#define pin_Triac 3          // RX / GPIO3
+#define pin_Encoder_CLK 0    // D3 / GPIO0
+#define pin_Encoder_DT 2     // D4 / GPIO2
+#define pin_Encoder_SW 16    // D0 / GPIO16
 
-#define pin_Encoder_CLK     0  // D3
-#define pin_Encoder_DT      2  // D4
-#define pin_Encoder_SW     16  // D0
-
-// === Rede elétrica ===
+// Rede elétrica
 #define MAINS_HZ 60
-#define HALF_CYCLE_US (1000000UL / (2UL * MAINS_HZ))  // ~8333 us @60Hz
+#define HALF_CYCLE_US (1000000UL / (2UL * MAINS_HZ))
 
-const uint8_t   OLED_pin_scl_sck        = 13; // D7
-const uint8_t   OLED_pin_sda_mosi       = 14; // D5
-const uint8_t   OLED_pin_cs_ss          = 15; // D8
-const uint8_t   OLED_pin_res_rst        = 5;  // D1
-const uint8_t   OLED_pin_dc_rs          = 4;  // D2
+const uint8_t OLED_pin_scl_sck  = 13; // D7
+const uint8_t OLED_pin_sda_mosi = 14; // D5
+const uint8_t OLED_pin_cs_ss    = 15; // D8
+const uint8_t OLED_pin_res_rst  = 5;  // D1
+const uint8_t OLED_pin_dc_rs    = 4;  // D2
 
-// 🔧 Parâmetros de tempo
+// Parâmetros de tempo
 #define min_Time_ms 3
 #define max_Time_ms 120
 #define min_Cycle_ms 1
 #define max_Cycle_ms 50
 
-// 🧠 EEPROM
-#define EEPROM_MAGIC_ADDR 500  // Posição na EEPROM
-#define EEPROM_MAGIC_VALUE 0x42 // Valor fixo para validar dados
+// EEPROM
+#define EEPROM_SIZE 512
+#define EEPROM_MAGIC_ADDR 500
+#define EEPROM_MAGIC_VALUE 0x42
 #define EEPROM_WIFI_CONFIG_START 0
 #define EEPROM_CYCLE_MS_ADDR 100
 #define EEPROM_TIME_MS_ADDR 102
 #define EEPROM_COUNTER_ADDR 104
 
-// 🖥️ Display
-#define SCREEN_WIDTH 96 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+// Display
+#define SCREEN_WIDTH 96
+#define SCREEN_HEIGHT 64
 
-// 🌐 DNS
 const byte DNS_PORT = 53;
 
-//============================================================
-// 🎨 Cores OLED (RGB565)
-//============================================================
-const uint16_t  OLED_Color_Black        = 0x0000;
-const uint16_t  OLED_Color_Blue         = 0x001F;
-const uint16_t  OLED_Color_Red          = 0xF800;
-const uint16_t  OLED_Color_Green        = 0x07E0;
-const uint16_t  OLED_Color_Cyan         = 0x07FF;
-const uint16_t  OLED_Color_Magenta      = 0xF81F;
-const uint16_t  OLED_Color_Yellow       = 0xFFE0;
-const uint16_t  OLED_Color_White        = 0xFFFF;
+const uint16_t OLED_Color_Black   = 0x0000;
+const uint16_t OLED_Color_Blue    = 0x001F;
+const uint16_t OLED_Color_Red     = 0xF800;
+const uint16_t OLED_Color_Green   = 0x07E0;
+const uint16_t OLED_Color_Cyan    = 0x07FF;
+const uint16_t OLED_Color_Magenta = 0xF81F;
+const uint16_t OLED_Color_Yellow  = 0xFFE0;
+const uint16_t OLED_Color_White   = 0xFFFF;
 
-// The colors we actually want to use
-uint16_t        OLED_Text_Color         = OLED_Color_Black;
-uint16_t        OLED_Background_Color    = OLED_Color_Blue;
+uint16_t OLED_Text_Color       = OLED_Color_Black;
+uint16_t OLED_Background_Color = OLED_Color_Blue;
 
-//============================================================
-// 🔧 Objetos
-//============================================================
-Adafruit_SSD1331 display =  Adafruit_SSD1331(OLED_pin_cs_ss, OLED_pin_dc_rs, OLED_pin_sda_mosi, OLED_pin_scl_sck, OLED_pin_res_rst);
-RotaryEncoder EncoderOne(pin_Encoder_CLK, pin_Encoder_DT);
+Adafruit_SSD1331 display = Adafruit_SSD1331(
+  OLED_pin_cs_ss,
+  OLED_pin_dc_rs,
+  OLED_pin_sda_mosi,
+  OLED_pin_scl_sck,
+  OLED_pin_res_rst
+);
+
 RotaryEncoder *encoder = nullptr;
-
 ESP8266WebServer server(80);
 ESP8266HTTPUpdateServer httpUpdater;
 DNSServer dnsServer;
 
-//============================================================
-// 🔗 Wi-Fi
-//============================================================
 struct WifiConfig {
   char ssid[32];
   char pass[64];
@@ -106,19 +91,12 @@ struct WifiConfig {
 WifiConfig wifiConfig;
 bool configMode = false;
 
-//============================================================
-// 🔧 Estados
-//============================================================
 enum MenuState { NORMAL, EDITANDO_CICLO, EDITANDO_TEMPO };
 MenuState menuState = NORMAL;
 
-//============================================================
-// 🔧 Variáveis Globais
-//============================================================
 uint16_t cycle_ms = 0;
 uint16_t time_ms = 0;
 uint32_t soldaCount = 0;
-
 
 bool buttonHeld = false;
 unsigned long buttonPressStart = 0;
@@ -129,130 +107,137 @@ int lastEncoderPos = 0;
 uint16_t last_cycle_ms = 0;
 uint16_t last_time_ms = 0;
 uint32_t last_soldaCount = 0;
-static String last_wifi_status = "";
-
-int16_t valorEncoder = 0;
-const unsigned long WATCHDOG_TIMEOUT = 30000; // 15 segundos
-volatile bool encoderFlag = false;
+String last_wifi_status = "";
 
 bool showValue = true;
-bool lastButtonState = HIGH;
-unsigned long lastButtonChange = 0;
-const unsigned long debounceDelay = 150;
-
+const unsigned long WATCHDOG_TIMEOUT = 30000; // 30 segundos
+const unsigned long longPressDuration = 5000;
+byte aux2 = 0;
 
 const char* githubAPI = "https://api.github.com/repos/JorgeBeserra/SoldaPonto/releases/latest";
 
-byte aux2 = 0;
-
-//============================================================
-// 🔥 Protótipos de Funções
-//============================================================
-
-// 🧠 EEPROM
 void checkEEPROM();
 void loadWifiConfig();
-void saveWifiConfig();
+void saveWifiConfig(bool allowEmpty = false);
 void saveSettings();
 void loadSettings();
 void saveCounter();
 void loadCounter();
-
-// 🌐 Wi-Fi
 void connectWifi();
 void startConfigPortal();
 void monitorWifi();
-
-// 🚀 OTA
 void checkForUpdate();
-void showOtaMessage(String msg);
-
-// 🕹️ Encoder
-void checkEncoderButton();
+void showOtaMessage(const String& msg);
+void checaBotaoEncoder();
 void atualizaValoresEncoder();
 void atualizaBlink();
-
-// 🔥 Watchdog
 void watchdogCheck();
 void watchdogReset();
-
-// 🖥️ Display
 void splashScreen();
 void screenOne();
 String getWifiStatus();
-
-// 🛠️ Trigger
-// Arredonda um tempo em micros para múltiplo de meia-onda
 static inline uint32_t roundToHalfCycles(uint32_t us);
+void delayMicrosFeed(uint32_t us);
 void trigger();
+String extractJsonString(const String& json, const String& key);
+bool isNewerVersion(String current, String latest);
 
-//============================================================
-// 🚦 Interrupções
-//============================================================
-IRAM_ATTR void checkPosition()
-{
-  encoder->tick();
+IRAM_ATTR void checkPosition() {
+  if (encoder != nullptr) {
+    encoder->tick();
+  }
 }
 
-//============================================================
-// 🚀 Setup
-//============================================================
-void setup()
-{
+void setup() {
   Serial.begin(74880);
   lastWatchdogReset = millis();
-  Serial.println("🖥️ Display Iniciando...");
+
+  Serial.println("Display iniciando...");
   display.begin();
   display.setFont();
   splashScreen();
-  
 
-  checkEEPROM();
   encoder = new RotaryEncoder(pin_Encoder_CLK, pin_Encoder_DT, RotaryEncoder::LatchMode::TWO03);
-  //Configura pino como saída
+
   digitalWrite(pin_Triac, LOW);
   pinMode(pin_Triac, OUTPUT);
-  //Configura pino como entrada PULL-UP
   pinMode(pin_Encoder_SW, INPUT_PULLUP);
-  //Configura pino como entrada PULL-UP
   pinMode(pin_Trigger, INPUT_PULLUP);
-
   pinMode(pin_Encoder_CLK, INPUT_PULLUP);
   pinMode(pin_Encoder_DT, INPUT_PULLUP);
 
+  checkEEPROM();
   loadWifiConfig();
+  loadSettings();
+  loadCounter();
+
+  lastEncoderPos = encoder->getPosition();
+
+  attachInterrupt(digitalPinToInterrupt(pin_Encoder_CLK), checkPosition, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pin_Encoder_DT), checkPosition, CHANGE);
+
   if (digitalRead(pin_Encoder_SW) == LOW) {
     startConfigPortal();
   } else {
     connectWifi();
   }
 
-  loadSettings();
-  loadCounter();
-
-  //================= Interrupção Externa ========================//
-  /* Vincula duas interrupções externas no pino 2 e 3 nas funções ISR0 e ISR1
-     para garantir que o encoder sempre seja lido com prioridade.*/
-  attachInterrupt(digitalPinToInterrupt(0), checkPosition, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(2), checkPosition, CHANGE);
-
-  EncoderOne.setPosition(1);
-  
   display.fillScreen(OLED_Background_Color);
-}//endSetup --------------------------------------
-
+}
 
 bool isNewerVersion(String current, String latest) {
-  current.replace(".", "");
-  latest.replace(".", "");
-  int currentNum = current.toInt();
-  int latestNum = latest.toInt();
-  return latestNum > currentNum;
+  current.replace("v", "");
+  current.replace("V", "");
+  latest.replace("v", "");
+  latest.replace("V", "");
+
+  int currentParts[3] = {0, 0, 0};
+  int latestParts[3] = {0, 0, 0};
+
+  for (int i = 0; i < 3; i++) {
+    int dot = current.indexOf('.');
+    String part = (dot >= 0) ? current.substring(0, dot) : current;
+    currentParts[i] = part.toInt();
+    if (dot < 0) break;
+    current = current.substring(dot + 1);
+  }
+
+  for (int i = 0; i < 3; i++) {
+    int dot = latest.indexOf('.');
+    String part = (dot >= 0) ? latest.substring(0, dot) : latest;
+    latestParts[i] = part.toInt();
+    if (dot < 0) break;
+    latest = latest.substring(dot + 1);
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (latestParts[i] > currentParts[i]) return true;
+    if (latestParts[i] < currentParts[i]) return false;
+  }
+
+  return false;
+}
+
+String extractJsonString(const String& json, const String& key) {
+  String token = "\"" + key + "\"";
+  int keyIndex = json.indexOf(token);
+  if (keyIndex < 0) return "";
+
+  int colonIndex = json.indexOf(':', keyIndex + token.length());
+  if (colonIndex < 0) return "";
+
+  int firstQuote = json.indexOf('"', colonIndex + 1);
+  if (firstQuote < 0) return "";
+
+  int secondQuote = json.indexOf('"', firstQuote + 1);
+  if (secondQuote < 0) return "";
+
+  return json.substring(firstQuote + 1, secondQuote);
 }
 
 void watchdogCheck() {
   if (millis() - lastWatchdogReset > WATCHDOG_TIMEOUT) {
-    Serial.println("🚨 Watchdog ativado! Reiniciando o ESP...");
+    Serial.println("Watchdog ativado. Reiniciando o ESP...");
     ESP.restart();
   }
 }
@@ -261,7 +246,7 @@ void watchdogReset() {
   lastWatchdogReset = millis();
 }
 
-void showOtaMessage(String msg) {
+void showOtaMessage(const String& msg) {
   display.fillScreen(OLED_Color_Black);
   display.setTextColor(OLED_Color_White);
   display.setTextSize(1);
@@ -275,162 +260,156 @@ void showOtaMessage(String msg) {
 
 void checkForUpdate() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("❌ Sem conexão Wi-Fi. Cancelando verificação.");
+    Serial.println("Sem Wi-Fi. Cancelando verificacao OTA.");
     showOtaMessage("Sem Wi-Fi");
     delay(2000);
     return;
   }
-  showOtaMessage("== Verificando ==");
+
+  showOtaMessage("Verificando");
   Serial.println("=======================================");
-  Serial.println("🚀 Verificação de Atualização OTA");
-  Serial.println("---------------------------------------");
-  Serial.printf("🔧 Firmware atual: v%s\n", FIRMWARE_VERSION);
-  Serial.println("🌐 Consultando GitHub...");
-  // Testa DNS
-  Serial.print("🔍 Testando DNS para api.github.com...");
+  Serial.println("Verificacao de atualizacao OTA");
+  Serial.printf("Firmware atual: v%s\n", FIRMWARE_VERSION);
+
   IPAddress githubIP;
+  Serial.print("Testando DNS api.github.com...");
   if (!WiFi.hostByName("api.github.com", githubIP)) {
-    Serial.println("❌ Falha na resolução DNS.");
-    watchdogReset(); yield();
+    Serial.println("Falha DNS.");
+    showOtaMessage("Falha DNS");
+    delay(2000);
     return;
   }
-  Serial.print("✔️ Resolvido IP: ");
   Serial.println(githubIP);
 
-  // Conexão HTTPS
-  WiFiClientSecure client;
-  client.setInsecure(); // Ignora SSL
+  BearSSL::WiFiClientSecure client;
+  client.setInsecure();
 
   HTTPClient https;
-  const char* url = "https://api.github.com/repos/JorgeBeserra/SoldaPonto/releases/latest";
+  if (!https.begin(client, githubAPI)) {
+    Serial.println("Falha ao iniciar HTTPS.");
+    showOtaMessage("HTTPS FAIL");
+    delay(2000);
+    return;
+  }
 
-  Serial.println("🔗 Acessando GitHub API...");
-  https.begin(client, url);
-  https.addHeader("User-Agent", "ESP8266"); // GitHub exige
-
+  https.addHeader("User-Agent", "ESP8266-SoldaPonto");
   int httpCode = https.GET();
 
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = https.getString();
-
-    // Extrair a tag_name (versão)
-    int tagIndex = payload.indexOf("\"tag_name\":\"v");
-    if (tagIndex < 0) {
-      showOtaMessage("[X] Sem versao");
-      Serial.println("❌ Não encontrou a versão no JSON.");
-      delay(2000);
-      https.end();
-      return;
-    }
-    int start = tagIndex + 13;
-    int end = payload.indexOf("\"", start);
-    String latestVersion = payload.substring(start, end);
-
-    Serial.printf("✅ Última versão no GitHub: %s\n", latestVersion.c_str());
-    Serial.printf("🔧 Minha versão atual: %s\n", FIRMWARE_VERSION);
-
-    // Extrair browser_download_url (link direto do binário)
-    int urlIndex = payload.indexOf("\"browser_download_url\":\"");
-    if (urlIndex < 0) {
-      Serial.println("❌ Não encontrou o link do binário no JSON.");
-      showOtaMessage("[X] Sem binario");
-      delay(2000);
-      https.end();
-      return;
-    }
-    int urlStart = urlIndex + strlen("\"browser_download_url\":\"");
-    int urlEnd = payload.indexOf("\"", urlStart);
-    String binUrl = payload.substring(urlStart, urlEnd);
-    binUrl.trim();
-
-    Serial.println("🗂️ Link do binário encontrado:");
-    Serial.println(binUrl);
-
-    https.end(); // Fecha a conexão HTTP
-    Serial.println("🧠 Comparando versões...");
-    if (isNewerVersion(FIRMWARE_VERSION, latestVersion)) {
-      showOtaMessage("[...] Atualizando");
-      Serial.println("🚀 Nova versão encontrada! Iniciando atualização OTA...");
-
-      // 🔥 LINHAS FUNDAMENTAIS PARA SUPORTE A REDIRECT:
-      ESPhttpUpdate.rebootOnUpdate(true);
-      ESPhttpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-      watchdogReset(); yield();
-      t_httpUpdate_return result = ESPhttpUpdate.update(client, binUrl);
-      watchdogReset(); yield();
-
-      switch (result) {
-        case HTTP_UPDATE_FAILED:
-          Serial.printf("❌ OTA falhou. Erro (%d): %s\n",
-                        ESPhttpUpdate.getLastError(),
-                        ESPhttpUpdate.getLastErrorString().c_str());
-          showOtaMessage("[X] Erro OTA");
-          delay(3000);
-          break;
-        case HTTP_UPDATE_NO_UPDATES:
-          Serial.println("⚠️ Nenhuma atualização disponível.");
-          showOtaMessage("- Sem atualizacao -");
-          delay(2000);
-          break;
-
-        case HTTP_UPDATE_OK:
-          Serial.println("✅ Atualização concluída. Reiniciando...");
-          showOtaMessage("[OK] Atualizado!");
-          delay(2000);
-          break;
-      }
-    } else {
-      Serial.println("👍 Firmware já está na última versão.");
-      showOtaMessage("- Ja atual. -");
-      delay(2000);
-    }
-
-  } else {
-    Serial.printf("❌ Falha na conexão. HTTP Code: %d\n", httpCode);
-    showOtaMessage("[X] HTTP FAIL");
-    delay(2000);
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.printf("Falha na conexao. HTTP Code: %d\n", httpCode);
+    showOtaMessage("HTTP FAIL");
     https.end();
+    delay(2000);
+    return;
   }
-  Serial.println("=======================================");
+
+  String payload = https.getString();
+  String latestVersion = extractJsonString(payload, "tag_name");
+  String binUrl = extractJsonString(payload, "browser_download_url");
+  https.end();
+
+  latestVersion.replace("v", "");
+  latestVersion.replace("V", "");
+  latestVersion.trim();
+  binUrl.trim();
+
+  if (latestVersion.length() == 0) {
+    Serial.println("Nao encontrou tag_name no JSON.");
+    showOtaMessage("Sem versao");
+    delay(2000);
+    return;
+  }
+
+  if (binUrl.length() == 0) {
+    Serial.println("Nao encontrou browser_download_url no JSON.");
+    showOtaMessage("Sem binario");
+    delay(2000);
+    return;
+  }
+
+  Serial.printf("Ultima versao no GitHub: %s\n", latestVersion.c_str());
+  Serial.println(binUrl);
+
+  if (!isNewerVersion(FIRMWARE_VERSION, latestVersion)) {
+    Serial.println("Firmware ja esta atualizado.");
+    showOtaMessage("Ja atual");
+    delay(2000);
+    return;
+  }
+
+  showOtaMessage("Atualizando");
+  Serial.println("Nova versao encontrada. Iniciando OTA...");
+
+  BearSSL::WiFiClientSecure updateClient;
+  updateClient.setInsecure();
+
+  ESPhttpUpdate.rebootOnUpdate(true);
+  ESPhttpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  watchdogReset();
+  yield();
+  t_httpUpdate_return result = ESPhttpUpdate.update(updateClient, binUrl);
+  watchdogReset();
+  yield();
+
+  switch (result) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("OTA falhou. Erro (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+      showOtaMessage("Erro OTA");
+      delay(3000);
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("Nenhuma atualizacao disponivel.");
+      showOtaMessage("Sem atualizacao");
+      delay(2000);
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println("Atualizacao concluida.");
+      showOtaMessage("Atualizado");
+      delay(2000);
+      break;
+  }
 }
 
 void loadWifiConfig() {
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
   EEPROM.get(EEPROM_WIFI_CONFIG_START, wifiConfig);
   EEPROM.end();
 
   if (wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
-    Serial.println("🚨 EEPROM inválida ou limpa. Aplicando valores padrão.");
-    memset(&wifiConfig, 0, sizeof(WifiConfig)); // Zera a estrutura
+    memset(&wifiConfig, 0, sizeof(WifiConfig));
+    Serial.println("Nenhuma rede Wi-Fi salva.");
     return;
   }
 
-  Serial.println("✅ Wi-Fi carregado da EEPROM:");
-  Serial.printf("🔸 SSID: %s\n", wifiConfig.ssid);
-  Serial.printf("🔸 Senha: %s\n", wifiConfig.pass);
+  wifiConfig.ssid[sizeof(wifiConfig.ssid) - 1] = '\0';
+  wifiConfig.pass[sizeof(wifiConfig.pass) - 1] = '\0';
+
+  Serial.println("Wi-Fi carregado da EEPROM:");
+  Serial.printf("SSID: %s\n", wifiConfig.ssid);
 }
 
-
-void saveWifiConfig() {
-
-  if (strlen(wifiConfig.ssid) == 0 || strlen(wifiConfig.pass) == 0) {
-    Serial.println("⚠️ Dados de Wi-Fi inválidos. Não salvando na EEPROM.");
+void saveWifiConfig(bool allowEmpty) {
+  if (!allowEmpty && strlen(wifiConfig.ssid) == 0) {
+    Serial.println("SSID vazio. Nao salvando Wi-Fi.");
     return;
   }
 
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
   EEPROM.put(EEPROM_WIFI_CONFIG_START, wifiConfig);
   EEPROM.commit();
-  Serial.println("💾 Configurações Wi-Fi salvas na EEPROM:");
-  Serial.print("🔸 SSID: ");
-  Serial.println(wifiConfig.ssid);
-  Serial.print("🔸 Senha: ");
-  Serial.println(wifiConfig.pass);
+  EEPROM.end();
+
+  if (strlen(wifiConfig.ssid) == 0) {
+    Serial.println("Wi-Fi limpo na EEPROM.");
+  } else {
+    Serial.println("Wi-Fi salvo na EEPROM.");
+    Serial.printf("SSID: %s\n", wifiConfig.ssid);
+  }
 }
 
 void saveSettings() {
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
   EEPROM.put(EEPROM_CYCLE_MS_ADDR, cycle_ms);
   EEPROM.put(EEPROM_TIME_MS_ADDR, time_ms);
   EEPROM.commit();
@@ -438,42 +417,44 @@ void saveSettings() {
 }
 
 void loadSettings() {
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
   EEPROM.get(EEPROM_CYCLE_MS_ADDR, cycle_ms);
   EEPROM.get(EEPROM_TIME_MS_ADDR, time_ms);
   EEPROM.end();
 
-  // Se os valores forem inválidos, aplica padrão seguro
-  if (cycle_ms < min_Cycle_ms || cycle_ms > max_Cycle_ms) cycle_ms = 30;
-  if (time_ms < min_Time_ms || time_ms > max_Time_ms) time_ms = 30;
+  if (cycle_ms < min_Cycle_ms || cycle_ms > max_Cycle_ms) cycle_ms = 20;
+  if (time_ms < min_Time_ms || time_ms > max_Time_ms) time_ms = 20;
 }
 
 void saveCounter() {
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
   EEPROM.put(EEPROM_COUNTER_ADDR, soldaCount);
   EEPROM.commit();
   EEPROM.end();
 }
 
 void loadCounter() {
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
   EEPROM.get(EEPROM_COUNTER_ADDR, soldaCount);
   EEPROM.end();
+
+  if (soldaCount == 0xFFFFFFFF) {
+    soldaCount = 0;
+  }
 }
 
 void connectWifi() {
   if (wifiConfig.ssid[0] == 0 || wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
-    Serial.println("❌ Nenhuma rede configurada.");
+    Serial.println("Nenhuma rede configurada.");
     return;
   }
 
-  Serial.printf("🔗 Conectando no Wi-Fi SSID: %s...\n", wifiConfig.ssid);
-
+  Serial.printf("Conectando no Wi-Fi SSID: %s...\n", wifiConfig.ssid);
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiConfig.ssid, wifiConfig.pass);
 
   unsigned long startAttemptTime = millis();
-  const unsigned long wifiTimeout = 15000; // 15 segundos
+  const unsigned long wifiTimeout = 15000;
 
   while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < wifiTimeout) {
     Serial.print(".");
@@ -483,53 +464,47 @@ void connectWifi() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ Wi-Fi conectado!");
-    Serial.print("📡 IP: ");
+    Serial.println("\nWi-Fi conectado.");
+    Serial.print("IP: ");
     Serial.println(WiFi.localIP());
     checkForUpdate();
   } else {
-    Serial.println("\n❌ Falha ao conectar no Wi-Fi.");
-    Serial.println("⚠️ Mantendo operação offline.");
+    Serial.println("\nFalha ao conectar. Operando offline.");
   }
 }
-
 
 void monitorWifi() {
   static unsigned long lastCheck = 0;
 
-  if (millis() - lastCheck > 10000) {  // A cada 10 segundos
-    lastCheck = millis();
+  if (millis() - lastCheck <= 10000) return;
+  lastCheck = millis();
 
-    // 👉 Verifica se há rede configurada ANTES de tentar
-    if ((wifiConfig.ssid[0] == 0) || (wifiConfig.ssid[0] == 0xFF) || (wifiConfig.ssid[0] == '\0')) {
-      Serial.println("❌ Nenhuma rede configurada. Não tentando reconectar.");
-      return;
-    }
+  if (configMode) return;
 
-    if (WiFi.status() != WL_CONNECTED && !configMode) {
-      Serial.println("⚠️ Wi-Fi desconectado. Tentando reconectar...");
+  if (wifiConfig.ssid[0] == 0 || wifiConfig.ssid[0] == 0xFF || wifiConfig.ssid[0] == '\0') {
+    return;
+  }
 
-      WiFi.disconnect();
-      WiFi.begin(wifiConfig.ssid, wifiConfig.pass);
+  if (WiFi.status() == WL_CONNECTED) return;
 
-      unsigned long startReconnect = millis();
-      const unsigned long reconnectTimeout = 10000;
+  Serial.println("Wi-Fi desconectado. Tentando reconectar...");
+  WiFi.disconnect();
+  WiFi.begin(wifiConfig.ssid, wifiConfig.pass);
 
-      while (WiFi.status() != WL_CONNECTED && millis() - startReconnect < reconnectTimeout) {
-        Serial.print(".");
-        delay(250);
-        yield();
-        watchdogReset();
-      }
+  unsigned long startReconnect = millis();
+  const unsigned long reconnectTimeout = 10000;
 
-      if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n✅ Reconectado ao Wi-Fi!");
-        Serial.print("📡 IP: ");
-        Serial.println(WiFi.localIP());
-      } else {
-        Serial.println("\n❌ Falha ao reconectar. Operando offline.");
-      }
-    }
+  while (WiFi.status() != WL_CONNECTED && millis() - startReconnect < reconnectTimeout) {
+    Serial.print(".");
+    delay(250);
+    yield();
+    watchdogReset();
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nReconectado ao Wi-Fi.");
+  } else {
+    Serial.println("\nFalha ao reconectar. Operando offline.");
   }
 }
 
@@ -537,13 +512,12 @@ void startConfigPortal() {
   configMode = true;
   WiFi.mode(WIFI_AP);
   WiFi.softAP("SoldaPontoConfig");
-  
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
-
   httpUpdater.setup(&server, "/update");
+
   server.on("/", HTTP_GET, []() {
-  String ip = WiFi.softAPIP().toString();
-String page = R"rawliteral(
+    String ip = WiFi.softAPIP().toString();
+    String page = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -553,62 +527,49 @@ String page = R"rawliteral(
 <style>
   body { font-family: Arial; background-color: #202124; color: #e8eaed; text-align: center; margin: 0; padding: 20px; }
   h2 { color: #fbbc04; }
-  .container { background-color: #303134; padding: 20px; border-radius: 10px; display: inline-block; max-width: 400px; width: 90%; box-shadow: 0px 0px 10px rgba(0,0,0,0.7); }
+  .container { background-color: #303134; padding: 20px; border-radius: 10px; display: inline-block; max-width: 400px; width: 90%; box-shadow: 0 0 10px rgba(0,0,0,0.7); }
   input, button { padding: 10px; margin: 8px 0; border-radius: 5px; border: none; width: 100%; box-sizing: border-box; }
   input { background-color: #3c4043; color: #e8eaed; }
-  input::placeholder { color: #9aa0a6; }
   button { background-color: #4285f4; color: white; cursor: pointer; font-weight: bold; }
-  button:hover { background-color: #3367d6; }
+  a { display: block; padding: 10px; background-color: #3c4043; border-radius: 5px; color: #8ab4f8; text-decoration: none; margin: 5px 0; }
   hr { border: 0; border-top: 1px solid #5f6368; margin: 20px 0; }
-  a { display: block; padding: 10px; background-color: #3c4043; border-radius: 5px; color: #8ab4f8; text-decoration: none; margin: 5px 0; transition: background-color 0.3s; }
-  a:hover { background-color: #5f6368; }
   .footer { margin-top: 15px; color: #9aa0a6; font-size: 0.9em; }
 </style>
 </head>
 <body>
-
-<h2>🔧 Configuração SoldaPonto</h2>
-
+<h2>Configuração SoldaPonto</h2>
 <div class="container">
   <form action="/save" method="POST">
-    <p><input type="text" name="ssid" placeholder="🔌 Nome da rede Wi-Fi" required></p>
-    <p><input type="password" name="pass" placeholder="🔒 Senha da rede" required></p>
-    <p><button type="submit">💾 Salvar e Reiniciar</button></p>
+    <p><input type="text" name="ssid" placeholder="Nome da rede Wi-Fi" required></p>
+    <p><input type="password" name="pass" placeholder="Senha da rede"></p>
+    <p><button type="submit">Salvar e Reiniciar</button></p>
   </form>
-
   <hr>
-
-  <a href="/update">🚀 Atualização OTA</a>
-  <a href="/resetwifi">❌ Resetar Wi-Fi</a>
-  <a href="/reseteeprom">🗑️ Resetar Configurações de Fábrica</a>
-
+  <a href="/update">Atualização OTA</a>
+  <a href="/resetwifi">Resetar Wi-Fi</a>
+  <a href="/reseteeprom">Resetar Configurações de Fábrica</a>
   <hr>
-
   <p><b>Dispositivo:</b> SoldaPonto v)rawliteral";
-page += FIRMWARE_VERSION;
-page += R"rawliteral(</p>
+    page += FIRMWARE_VERSION;
+    page += R"rawliteral(</p>
   <p><b>Modo:</b> Configuração (AP)</p>
   <p><b>IP do dispositivo:</b> )rawliteral";
-page += ip;
-page += R"rawliteral(</p>
-
-  <div class="footer">
-    🔧 Desenvolvido por Jorge Souza
-  </div>
+    page += ip;
+    page += R"rawliteral(</p>
+  <div class="footer">Desenvolvido por Jorge Souza</div>
 </div>
-
 </body>
 </html>
 )rawliteral";
 
-
-  server.send(200, "text/html", page);
-});
+    server.send(200, "text/html", page);
+  });
 
   server.on("/save", HTTP_POST, []() {
-    if (server.hasArg("ssid") && server.hasArg("pass")) {
+    if (server.hasArg("ssid")) {
       String s = server.arg("ssid");
-      String p = server.arg("pass");
+      String p = server.hasArg("pass") ? server.arg("pass") : "";
+      memset(&wifiConfig, 0, sizeof(WifiConfig));
       s.toCharArray(wifiConfig.ssid, sizeof(wifiConfig.ssid));
       p.toCharArray(wifiConfig.pass, sizeof(wifiConfig.pass));
       saveWifiConfig();
@@ -621,102 +582,96 @@ page += R"rawliteral(</p>
   });
 
   server.on("/resetwifi", HTTP_GET, []() {
-  Serial.println("⚠️ Resetando Wi-Fi...");
-  memset(&wifiConfig, 0, sizeof(WifiConfig));
-  saveWifiConfig();
-  server.send(200, "text/plain", "Wi-Fi resetado. Reiniciando...");
-  delay(1000);
-  ESP.restart();
-});
+    Serial.println("Resetando Wi-Fi...");
+    memset(&wifiConfig, 0, sizeof(WifiConfig));
+    saveWifiConfig(true);
+    server.send(200, "text/plain", "Wi-Fi resetado. Reiniciando...");
+    delay(1000);
+    ESP.restart();
+  });
 
-server.on("/reseteeprom", HTTP_GET, []() {
-  Serial.println("⚠️ Resetando EEPROM...");
-  EEPROM.begin(512);
-  for (int i = 0; i < 512; i++) EEPROM.write(i, 0xFF);
-  EEPROM.commit();
-  server.send(200, "text/plain", "EEPROM apagada. Reiniciando...");
-  delay(1000);
-  ESP.restart();
-});
+  server.on("/reseteeprom", HTTP_GET, []() {
+    Serial.println("Resetando EEPROM...");
+    EEPROM.begin(EEPROM_SIZE);
+    for (int i = 0; i < EEPROM_SIZE; i++) EEPROM.write(i, 0xFF);
+    EEPROM.commit();
+    EEPROM.end();
+    server.send(200, "text/plain", "EEPROM apagada. Reiniciando...");
+    delay(1000);
+    ESP.restart();
+  });
 
   server.begin();
 }
 
-const unsigned long longPressDuration = 5000; // 5 segundos
-
 void checaBotaoEncoder() {
   bool buttonState = digitalRead(pin_Encoder_SW);
 
-  if (buttonState == LOW) { // Botão pressionado
+  if (buttonState == LOW) {
     if (!buttonHeld) {
       buttonPressStart = millis();
       buttonHeld = true;
-    } else {
-      if (millis() - buttonPressStart >= longPressDuration) {
-        Serial.println("🟢 Botão pressionado por 5s -> Verificando atualização OTA...");
-        checkForUpdate();
-        buttonHeld = false;  // Reseta após a atualização
+    } else if (millis() - buttonPressStart >= longPressDuration) {
+      Serial.println("Botao pressionado por 5s. Verificando OTA...");
+      checkForUpdate();
+      buttonHeld = false;
+    }
+  } else {
+    if (buttonHeld && millis() - buttonPressStart < longPressDuration) {
+      if (menuState == NORMAL) {
+        menuState = EDITANDO_CICLO;
+        Serial.println("Editando ciclo.");
+      } else if (menuState == EDITANDO_CICLO) {
+        menuState = EDITANDO_TEMPO;
+        Serial.println("Editando tempo.");
+      } else {
+        menuState = NORMAL;
+        Serial.println("Modo normal. Salvando configuracoes.");
+        saveSettings();
       }
     }
-  } else { // Botão solto
-    if (buttonHeld) {
-      if (millis() - buttonPressStart < longPressDuration) {
-        // Pressão curta -> troca entre os modos de edição
-        if (menuState == NORMAL) {
-          menuState = EDITANDO_CICLO;
-          Serial.println("🟢 Botão pressionado Ciclo...");
-        } else if (menuState == EDITANDO_CICLO) {
-          menuState = EDITANDO_TEMPO;
-          Serial.println("🟢 Botão pressionado Tempo...");
-        } else if (menuState == EDITANDO_TEMPO) {
-          menuState = NORMAL;
-          Serial.println("🟢 Botão pressionado Normal...");
-          saveSettings();
-        }
-      }
-      buttonHeld = false; // Reseta estado do botão
-    }
+    buttonHeld = false;
   }
 }
-
-
 
 void atualizaValoresEncoder() {
+  if (encoder == nullptr) return;
+
   encoder->tick();
   int newPos = encoder->getPosition();
-  if (newPos != lastEncoderPos) {
-    int delta = newPos - lastEncoderPos;
-    if (menuState == EDITANDO_CICLO) {
-      cycle_ms += delta;
-      if (cycle_ms < min_Cycle_ms) cycle_ms = min_Cycle_ms;
-      if (cycle_ms > max_Cycle_ms) cycle_ms = max_Cycle_ms;
-    } else if (menuState == EDITANDO_TEMPO) {
-      time_ms += delta;
-      if (time_ms < min_Time_ms) time_ms = min_Time_ms;
-      if (time_ms > max_Time_ms) time_ms = max_Time_ms;
-    }
-    lastEncoderPos = newPos;
+  if (newPos == lastEncoderPos) return;
+
+  int delta = newPos - lastEncoderPos;
+
+  if (menuState == EDITANDO_CICLO) {
+    int novo = (int)cycle_ms + delta;
+    if (novo < min_Cycle_ms) novo = min_Cycle_ms;
+    if (novo > max_Cycle_ms) novo = max_Cycle_ms;
+    cycle_ms = novo;
+  } else if (menuState == EDITANDO_TEMPO) {
+    int novo = (int)time_ms + delta;
+    if (novo < min_Time_ms) novo = min_Time_ms;
+    if (novo > max_Time_ms) novo = max_Time_ms;
+    time_ms = novo;
   }
+
+  lastEncoderPos = newPos;
 }
 
-
 void atualizaBlink() {
-  // Pisca só em modo edição
   if (menuState == EDITANDO_CICLO || menuState == EDITANDO_TEMPO) {
     if (millis() - lastBlink > 350) {
       showValue = !showValue;
       lastBlink = millis();
     }
   } else {
-    showValue = true; // Sempre mostra tudo no modo normal
+    showValue = true;
   }
 }
 
 void splashScreen() {
   display.fillScreen(OLED_Color_Black);
   display.setTextColor(OLED_Color_White);
-
-  // Texto principal
   display.setTextSize(2);
 
   int16_t x1, y1;
@@ -730,66 +685,53 @@ void splashScreen() {
   display.setCursor((SCREEN_WIDTH - w) / 2, 35);
   display.print("Ponto");
 
-  // Versão
   display.setTextSize(1);
   String versao = "Versao: ";
   versao += FIRMWARE_VERSION;
-
   display.getTextBounds(versao, 0, 0, &x1, &y1, &w, &h);
   display.setCursor((SCREEN_WIDTH - w) / 2, 55);
   display.print(versao);
-
   delay(2000);
 }
 
 String getWifiStatus() {
-  if (WiFi.status() == WL_CONNECTED) {
-    return "WiFi OK";
-  } else {
-    return "Sem WiFi";
-  }
+  return (WiFi.status() == WL_CONNECTED) ? "WiFi OK" : "Sem WiFi";
 }
 
 void checkEEPROM() {
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
+
   if (EEPROM.read(EEPROM_MAGIC_ADDR) != EEPROM_MAGIC_VALUE) {
-    Serial.println("🚨 EEPROM inválida ou limpa. Aplicando valores padrão.");
+    Serial.println("EEPROM invalida ou limpa. Aplicando padrao.");
 
-    // Resetando WiFi
     memset(&wifiConfig, 0, sizeof(WifiConfig));
-
-    // Resetando configurações de ciclo e tempo
     cycle_ms = 20;
     time_ms = 20;
-
-    // Resetando contador de soldas
     soldaCount = 0;
 
-    // Salvando tudo na EEPROM
-    saveWifiConfig();
-    saveSettings();
-    saveCounter();
-
-    // Escrevendo o magic byte
+    EEPROM.put(EEPROM_WIFI_CONFIG_START, wifiConfig);
+    EEPROM.put(EEPROM_CYCLE_MS_ADDR, cycle_ms);
+    EEPROM.put(EEPROM_TIME_MS_ADDR, time_ms);
+    EEPROM.put(EEPROM_COUNTER_ADDR, soldaCount);
     EEPROM.write(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
     EEPROM.commit();
-    Serial.println("✅ EEPROM inicializada com sucesso.");
+
+    Serial.println("EEPROM inicializada com sucesso.");
   } else {
-    Serial.println("✔️ EEPROM válida.");
+    Serial.println("EEPROM valida.");
   }
+
   EEPROM.end();
 }
 
-
-
-
-void loop()
-{
+void loop() {
   watchdogCheck();
+
   if (configMode) {
     dnsServer.processNextRequest();
     server.handleClient();
   }
+
   monitorWifi();
   trigger();
   checaBotaoEncoder();
@@ -797,48 +739,39 @@ void loop()
   atualizaBlink();
   screenOne();
   watchdogReset();
-}//end_void_loop ----------------------
+}
 
-
-// Arredonda um tempo em micros para múltiplo de meia-onda
 static inline uint32_t roundToHalfCycles(uint32_t us) {
-  uint32_t n = (us + (HALF_CYCLE_US/2)) / HALF_CYCLE_US;
-  if (n < 1) n = 1;                 // garante pelo menos 1 meia-onda
+  uint32_t n = (us + (HALF_CYCLE_US / 2)) / HALF_CYCLE_US;
+  if (n < 1) n = 1;
   return n * HALF_CYCLE_US;
 }
 
 void delayMicrosFeed(uint32_t us) {
   uint32_t start = micros();
   while ((micros() - start) < us) {
-    // Alimenta watchdog e WiFi
     yield();
     watchdogReset();
   }
 }
 
-void trigger()
-{
-  static const uint16_t intervalo_ms = 40; // pausa entre pulsos
+void trigger() {
+  static const uint16_t intervalo_ms = 40;
 
-  if (digitalRead(pin_Trigger) ) //Se o botão está solto
-  {
+  if (digitalRead(pin_Trigger)) {
     aux2 = 1;
   }
 
-if (!digitalRead(pin_Trigger) && aux2 == 1) { // pressionado uma vez
-    // Calcula duração do pulso como múltiplos de meia-onda (mais limpo p/ SSR zero-cross)
+  if (!digitalRead(pin_Trigger) && aux2 == 1) {
     uint32_t pulso_us = roundToHalfCycles((uint32_t)time_ms * 1000UL);
-
-    // Barra de progresso
     const int barX = 10, barY = 50, barW = 76, barH = 10;
+
     display.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, OLED_Color_White);
 
-    for (uint16_t p = 0; p < cycle_ms; ++p) {          // cycle_ms = número de pulsos
-      // Liga SSR (zero-cross: vai conduzir no próximo zero da rede)
+    for (uint16_t p = 0; p < cycle_ms; ++p) {
       digitalWrite(pin_Triac, HIGH);
-      Serial.printf("Pulso %u/%u ON\n", p+1, cycle_ms);
+      Serial.printf("Pulso %u/%u ON\n", p + 1, cycle_ms);
 
-      // Progresso do pulso atual (baseado no tempo arredondado)
       uint32_t start = micros();
       while ((micros() - start) < pulso_us) {
         float progress = (float)(micros() - start) / (float)pulso_us;
@@ -846,87 +779,42 @@ if (!digitalRead(pin_Trigger) && aux2 == 1) { // pressionado uma vez
         int filled = (int)(progress * barW);
         display.fillRect(barX, barY, filled, barH, OLED_Color_Green);
         display.fillRect(barX + filled, barY, barW - filled, barH, OLED_Background_Color);
-
-        // Alimenta watchdog durante o pulso
         yield();
         watchdogReset();
       }
 
-      // Desliga SSR (vai desligar no próximo zero da rede)
       digitalWrite(pin_Triac, LOW);
       Serial.println("Pulso OFF");
-
-      // Limpa barra ao fim do pulso
       display.fillRect(barX, barY, barW, barH, OLED_Background_Color);
 
-      // Conta solda e salva
       soldaCount++;
       saveCounter();
 
-      // Pausa entre pulsos (exceto depois do último)
       if (p + 1 < cycle_ms) {
-        uint32_t pausa_us = (uint32_t)intervalo_ms * 1000UL;
-        delayMicrosFeed(pausa_us);
+        delayMicrosFeed((uint32_t)intervalo_ms * 1000UL);
       }
     }
-
-
-
-    /*
-    unsigned long start = millis();
-
-    while (millis() - start < time_ms) {
-      float progress = (float)(millis() - start) / (float)time_ms;
-      if (progress > 1.0) progress = 1.0;
-      int filled = progress * barWidth;
-
-      display.fillRect(barX, barY, filled, barHeight, OLED_Color_Green);
-      display.fillRect(barX + filled, barY, barWidth - filled, barHeight, OLED_Background_Color);
-
-      delay(10);
-    }
-
-    digitalWrite(pin_Triac, LOW);
-    Serial.println("Desativado");
-
-    display.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, OLED_Background_Color);
-    soldaCount++;
-    saveCounter();
-    */
 
     aux2 = 0;
     delay(200);
   }
+}
 
-
-}//----------------------- end_selecionaTela
-
-
-
-void screenOne()
-{
-  
+void screenOne() {
   String wifiStatus = (WiFi.status() == WL_CONNECTED) ? "[WiFi]" : "[ X ]";
-  
-  if (!digitalRead(pin_Encoder_SW) ) //Se o botão está solto
-  {
-    Serial.println("Rotary pressionado");
-  }
 
   static int pos = 0;
-
-  encoder->tick(); // just call tick() to check the state.
-
-  int newPos = encoder->getPosition();
-
-  //valorEncoder = EncoderOne.getPosition();//Captura o valor do encoder
-  if (pos != newPos) {
-    Serial.print("pos:");
-    Serial.print(newPos);
-    Serial.print(" dir:");
-    Serial.println((int)(encoder->getDirection()));
-    pos = newPos;
-  } // if
+  if (encoder != nullptr) {
+    encoder->tick();
+    int newPos = encoder->getPosition();
+    if (pos != newPos) {
+      Serial.print("pos:");
+      Serial.print(newPos);
+      Serial.print(" dir:");
+      Serial.println((int)(encoder->getDirection()));
+      pos = newPos;
+    }
+  }
 
   static bool desenhouTitulos = false;
   if (!desenhouTitulos) {
@@ -946,55 +834,45 @@ void screenOne()
     desenhouTitulos = true;
   }
 
-  // Limpa só a área dos valores
-  if(last_cycle_ms != cycle_ms){
+  if (last_cycle_ms != cycle_ms || (menuState == EDITANDO_CICLO && !showValue)) {
     display.fillRect(35, 1, 45, 16, OLED_Background_Color);
     last_cycle_ms = cycle_ms;
   }
 
-  if(last_time_ms != time_ms){
+  if (last_time_ms != time_ms || (menuState == EDITANDO_TEMPO && !showValue)) {
     display.fillRect(35, 25, 45, 16, OLED_Background_Color);
     last_time_ms = time_ms;
   }
 
-    // Exibe ciclo (piscando só se editando)
   if (!(menuState == EDITANDO_CICLO && !showValue)) {
-    
     if (cycle_ms <= 9) display.setCursor(67, 1);
-    else if (cycle_ms >= 10 && cycle_ms <= 99) display.setCursor(55, 1);
-    else if (cycle_ms >= 100) display.setCursor(43, 1);
+    else if (cycle_ms <= 99) display.setCursor(55, 1);
+    else display.setCursor(43, 1);
 
     display.setTextSize(2);
     display.setTextColor(OLED_Text_Color);
     display.print(cycle_ms);
   }
 
-  // Exibe tempo (piscando só se editando)
   if (!(menuState == EDITANDO_TEMPO && !showValue)) {
-
     if (time_ms <= 9) display.setCursor(67, 25);
-    else if (time_ms >= 10 && time_ms <= 99) display.setCursor(55, 25);
-    else if (time_ms >= 100) display.setCursor(43, 25);
-    
+    else if (time_ms <= 99) display.setCursor(55, 25);
+    else display.setCursor(43, 25);
+
     display.setTextSize(2);
     display.setTextColor(OLED_Text_Color);
     display.print(time_ms);
   }
 
-   if (last_soldaCount != soldaCount || wifiStatus != last_wifi_status) {
-    // Limpa área inferior
+  if (last_soldaCount != soldaCount || wifiStatus != last_wifi_status) {
     display.fillRect(0, 50, SCREEN_WIDTH, 14, OLED_Background_Color);
-
     display.setTextSize(1);
     display.setCursor(1, 55);
     display.print(wifiStatus);
-
     display.setCursor(60, 55);
     display.print("S:");
     display.print(soldaCount);
-
     last_soldaCount = soldaCount;
     last_wifi_status = wifiStatus;
   }
-
-}//end_screenOne ----------------------
+}
