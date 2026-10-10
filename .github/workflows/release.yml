@@ -5,7 +5,8 @@ on:
     branches: 
       - main  # ou seu branch padrão
     paths:
-      - 'SoldaPonto.ino'  # Monitora apenas esse arquivo
+      - 'SoldaPonto.ino'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
@@ -44,6 +45,11 @@ jobs:
           arduino-cli lib install "Adafruit SSD1331 OLED Driver Library for Arduino"   # adicione outras se necessário
           arduino-cli lib install "RotaryEncoder" 
       
+      - name: Compile firmware
+        run: |
+          arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --export-binaries --output-dir build .
+          mv build/*.bin build/SoldaPonto.bin
+
       - name: Create Git Tag
         run: |
           git config user.name "github-actions"
@@ -56,11 +62,6 @@ jobs:
             git tag -a v${{ steps.version.outputs.version }} -m "Release v${{ steps.version.outputs.version }}"
             git push origin v${{ steps.version.outputs.version }}
           fi
-
-      - name: Compile firmware
-        run: |
-          arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --export-binaries --output-dir build .
-          mv build/*.bin build/SoldaPonto.bin
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v1
