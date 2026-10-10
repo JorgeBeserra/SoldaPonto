@@ -787,13 +787,14 @@ void trigger() {
       Serial.println("Pulso OFF");
       display.fillRect(barX, barY, barW, barH, OLED_Background_Color);
 
-      soldaCount++;
-      saveCounter();
-
       if (p + 1 < cycle_ms) {
         delayMicrosFeed((uint32_t)intervalo_ms * 1000UL);
       }
     }
+
+    // Conta uma solda completa por acionamento, não um incremento por pulso.
+    soldaCount++;
+    saveCounter();
 
     aux2 = 0;
     delay(200);
